@@ -19,7 +19,7 @@ still need to work, systems using python 2 still have to be supported and extend
 - Even more things are present but working improperly
 
 ## Development
-- This is quite a straightforward convertion of dataclasses into a py2 syntax/standard done initially by neural network, and after that it was reviewed and fixed by human.
+- This is quite a straightforward convertion of dataclasses into a py2 syntax/standard done initially by neural network, and after that it was reviewed, fixed and finished by human.
 - Tests are stolen from cpython 3.14 branch and converted (poorly) to py2
 - This is **not** production ready (yet)
 - Contributions are welcome ~~please help~~
