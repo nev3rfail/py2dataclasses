@@ -167,7 +167,7 @@ class TestCase(unittest.TestCase):
             with self.subTest(hash=hash_, compare=compare):
                 @dataclass(unsafe_hash=True)
                 class C(object):
-                    __annotations__ = {'x': int}
+                    #__annotations__ = {'x': int}
                     x = field(_typ=int, compare=compare, hash=hash_, default=5)
 
                 if result == 'field':
@@ -275,15 +275,15 @@ class TestCase(unittest.TestCase):
     def test_field_order(self):
         @dataclass
         class B(object):
-            __annotations__ = OrderedDict((('a', str), ('b', str), ('c', str)))
-            a = 'B:a'
-            b = 'B:b'
-            c = 'B:c'
+            #__annotations__ = OrderedDict((('a', str), ('b', str), ('c', str)))
+            a = field(str, 'B:a')
+            b = field(str, 'B:b')
+            c = field(str, 'B:c')
 
         @dataclass
         class C(B):
-            __annotations__ = {'b': str}
-            b = 'C:b'
+            ##__annotations__ = {'b': str}
+            b = field(str, 'C:b')
 
         self.assertEqual([(f.name, f.default) for f in fields(C)],
                          [('a', 'B:a'),
@@ -317,14 +317,18 @@ class TestCase(unittest.TestCase):
         # Make sure we can't be compared to a tuple.
         @dataclass
         class Point(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         self.assertNotEqual(Point(1, 2), (1, 2))
 
         # And that we can't compare to another unrelated dataclass.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         self.assertNotEqual(Point(1, 3), C(1, 3))
 
@@ -339,8 +343,8 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class C(object):
-            __annotations__ = {'i': int}
-            i = 10
+            #__annotations__ = {'i': int}
+            i = field(int, 10)
 
             def __post_init__(self):
                 if self.i == 10:
@@ -402,11 +406,15 @@ class TestCase(unittest.TestCase):
     def test_helper_asdict_nested(self):
         @dataclass
         class UserId(object):
-            __annotations__ = {'token': int, 'group': int}
+            #__annotations__ = {'token': int, 'group': int}
+            token = field(int)
+            group = field(int)
 
         @dataclass
         class User(object):
-            __annotations__ = {'name': str, 'id': UserId}
+            #__annotations__ = {'name': str, 'id': UserId}
+            name = field(str)
+            id =  field(UserId)
 
         u = User('Joe', UserId(123, 1))
         d = asdict(u)
@@ -547,11 +555,15 @@ class TestCase(unittest.TestCase):
         # Ensure that order=False is the default.
         @dataclass
         class C0(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         @dataclass(order=False)
         class C1(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         for cls in [C0, C1]:
             with self.subTest(cls=cls):
@@ -562,7 +574,9 @@ class TestCase(unittest.TestCase):
 
         @dataclass(order=True)
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         self.assertTrue(C(0, 0) == C(0, 0))
         self.assertTrue(C(0, 0) <= C(0, 0))
@@ -602,14 +616,14 @@ class TestCase(unittest.TestCase):
     def test_no_init(self):
         @dataclass(init=False)
         class C(object):
-            __annotations__ = {'i': int}
+            #__annotations__ = {'i': int}
             i = 0
 
         self.assertEqual(C().i, 0)
 
         @dataclass(init=False)
         class C(object):
-            __annotations__ = {'i': int}
+            #__annotations__ = {'i': int}
             i = 2
 
             def __init__(self):
@@ -621,7 +635,8 @@ class TestCase(unittest.TestCase):
         # Test a class with no __repr__ and repr=False.
         @dataclass(repr=False)
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
+            x = field(int)
 
         self.assertIn('C object at', repr(C(3)))
 
@@ -629,7 +644,8 @@ class TestCase(unittest.TestCase):
         # Test a class with no __eq__ and eq=False.
         @dataclass(eq=False)
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
+            x = field(int)
 
         self.assertNotEqual(C(0), C(0))
         c = C(3)
@@ -638,7 +654,8 @@ class TestCase(unittest.TestCase):
     def test_frozen(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'i': int}
+            #__annotations__ = {'i': int}
+            i = field(int)
 
         c = C(10)
         self.assertEqual(c.i, 10)
@@ -649,7 +666,8 @@ class TestCase(unittest.TestCase):
     def test_frozen_hash(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'x': object}
+            #__annotations__ = {'x': object}
+            x = field(object)
 
         # If x is immutable, we can compute the hash.
         hash(C(3))
@@ -733,7 +751,8 @@ class TestMakeDataclass(unittest.TestCase):
     def test_base_dataclass(self):
         @dataclass
         class Base1(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
+            x = field(int)
 
         class Base2(object):
             pass
@@ -764,7 +783,9 @@ class TestReplace(unittest.TestCase):
     def test(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         c = C(1, 2)
         c1 = replace(c, x=3)
@@ -797,7 +818,9 @@ class TestReplace(unittest.TestCase):
     def test_invalid_field_name(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         c = C(1, 2)
         with self.assertRaisesRegexp(TypeError, r"__init__\(\) got an unexpected "
@@ -807,7 +830,9 @@ class TestReplace(unittest.TestCase):
     def test_invalid_object(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int)
 
         with self.assertRaisesRegexp(TypeError, 'dataclass instance'):
             replace(C, x=3)
@@ -842,8 +867,10 @@ class TestFieldNoAnnotation(unittest.TestCase):
         with self.assertRaisesRegexp(TypeError,
                                      "'f' is a field but has no type annotation"):
             @dataclass
-            class C(object):
+            class TEST_NO_ANNOTATION(object):
                 f = field()
+
+            pass
 
 
 if __name__ == '__main__':

@@ -745,6 +745,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         fields[f.name] = f
 
         if isinstance(getattr(cls, f.name, None), Field):
+            if f.type is MISSING:
+                raise TypeError('{0!r} is a field but has no type annotation'.format(f.name))
             if f.default is MISSING:
                 delattr(cls, f.name)
             else:
