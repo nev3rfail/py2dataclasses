@@ -9,7 +9,7 @@ import itertools
 from collections import OrderedDict
 
 from reprlib import recursive_repr, repr as actual_recursive_repr
-isidentifier = keyword.iskeyword
+from string_utils import isidentifier
 from cheap_repr import cheap_repr
 
 from dictproxyhack import dictproxy
@@ -17,6 +17,9 @@ import typing
 MappingProxyType = dictproxy
 GenericAlias = type(typing.List[int])
 
+class DataclassInstance(typing.Protocol):
+    __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, Field[typing.Any]]]
+_DataclassT = typing.TypeVar("_DataclassT", bound=DataclassInstance)
 
 # Raised when an attempt is made to modify a frozen class.
 class FrozenInstanceError(AttributeError):
@@ -492,7 +495,7 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
         # Add the keyword-only args.
         _init_params += ['*']
         _init_params += [_init_param(f) for f in kw_only_fields]
-    func_builder.add_fn('__init__',
+    return func_builder.add_fn('__init__',
                         [self_name] + _init_params,
                         body_lines,
                         locals=locals,
@@ -507,20 +510,20 @@ def _frozen_get_del_attr(cls, fields, func_builder):
     if fields:
         condition += ' or name in {' + ', '.join(repr(f.name) for f in fields) + '}'
 
-    func_builder.add_fn('__setattr__',
+    _set_new_attribute(cls,"setattrfun", func_builder.add_fn('__setattr__',
                         ('self', 'name', 'value'),
                         ('  if {0}:'.format(condition),
-                         '   raise FrozenInstanceError("cannot assign to field {{0!r}}".format(name))',
+                         '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
                          '  super(cls, self).__setattr__(name, value)'),
                         locals=locals,
-                        overwrite_error=True)
-    func_builder.add_fn('__delattr__',
+                        overwrite_error=True))
+    _set_new_attribute(cls,"delattrfun",func_builder.add_fn('__delattr__',
                         ('self', 'name'),
                         ('  if {0}:'.format(condition),
-                         '   raise FrozenInstanceError("cannot delete field {{0!r}}".format(name))',
+                         '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
                          '  super(cls, self).__delattr__(name)'),
                         locals=locals,
-                        overwrite_error=True)
+                        overwrite_error=True))
 
 
 def _is_classvar(a_type, typing):
@@ -790,7 +793,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         # Does this class have a post-init function?
         has_post_init = hasattr(cls, _POST_INIT_NAME)
 
-        _init_fn(all_init_fields,
+        i = _init_fn(all_init_fields,
                  std_init_fields,
                  kw_only_init_fields,
                  frozen,
@@ -799,6 +802,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                  func_builder,
                  slots,
                  )
+        _set_new_attribute(cls, "initbody", i)
 
     _set_new_attribute(cls, '__replace__', _replace)
 
@@ -1241,10 +1245,26 @@ def _astuple_inner(obj, tuple_factory):
         return copy.deepcopy(obj)
 
 
-def make_dataclass(cls_name, fields, bases=(), namespace=None, init=True,
-                   repr=True, eq=True, order=False, unsafe_hash=False,
-                   frozen=False, match_args=True, kw_only=False, slots=False,
-                   weakref_slot=False, module=None, decorator=None):
+def make_dataclass(
+        cls_name, # type: str
+        fields, # type: typing.Iterable[typing.Union[str, typing.Tuple[str, typing.Any], typing.Tuple[str, typing.Any, typing.Any]]]
+        bases=(), # type: typing.Tuple[type, ...]
+        namespace=None, # type: typing.Optional[typing.Dict[str, typing.Any]]
+        init=True, # type: bool
+        repr=True, # type: bool
+        eq=True, # type: bool
+        order=False, # type: bool
+        unsafe_hash=False, # type: bool
+        frozen=False, # type: bool
+        match_args=True, # type: bool
+        kw_only=False, # type: bool
+        slots=False, # type: bool
+        weakref_slot=False, # type: bool
+        module=None, # type: typing.Optional[str],
+        decorator=dataclass # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
+):
+    # type: (...) -> type
+
     """Return a new dynamically created dataclass.
 
     The dataclass name will be 'cls_name'.  'fields' is an iterable
@@ -1269,6 +1289,9 @@ def make_dataclass(cls_name, fields, bases=(), namespace=None, init=True,
 
     if namespace is None:
         namespace = OrderedDict()
+    elif type(namespace) is dict:
+        namespace = OrderedDict(namespace)
+
 
     # Validate field names
     seen = set()

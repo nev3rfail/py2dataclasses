@@ -760,7 +760,7 @@ class TestMakeDataclass(unittest.TestCase):
         C = make_dataclass('C',
                            [('y', int)],
                            bases=(Base1, Base2))
-        with self.assertRaisesRegexp(TypeError, 'required positional'):
+        with self.assertRaisesRegexp(TypeError, '__init__\(\) takes exactly 3 arguments \(2 given\)'):
             c = C(2)
         c = C(1, 2)
         self.assertIsInstance(c, C)
