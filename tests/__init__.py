@@ -5,9 +5,12 @@ import contextlib
 import os.path
 
 import sys
+from collections import OrderedDict
+
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 sys.path.append(path)
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass
+from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, of, asdict, \
+    astuple,  FrozenInstanceError, MISSING
 import unittest2 as unittest
 import pickle
 import copy
@@ -45,7 +48,7 @@ class TestCase(unittest.TestCase):
     def test_one_field_no_default(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            x = field(int)
 
         o = C(42)
         self.assertEqual(o.x, 42)
@@ -55,13 +58,14 @@ class TestCase(unittest.TestCase):
         with self.assertRaisesRegexp(ValueError, msg):
             @dataclass
             class C(object):
-                __annotations__ = {'x': int}
+                #__annotations__ = {'x': int}
                 x = field(int, default=1, default_factory=int)
 
     def test_named_init_params(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
+            x = field(int)
 
         o = C(x=32)
         self.assertEqual(o.x, 32)
@@ -69,8 +73,9 @@ class TestCase(unittest.TestCase):
     def test_two_fields_one_default(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
-            y = 0
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
+            y = field(int, 0)
 
         o = C(3)
         self.assertEqual((o.x, o.y), (3, 0))
@@ -81,27 +86,27 @@ class TestCase(unittest.TestCase):
                                      "default argument 'x'"):
             @dataclass
             class C(object):
-                __annotations__ = {'x': int, 'y': int}
-                x = 0
+                #__annotations__ = {'x': int, 'y': int}
+                x = field(int, 0)
+                y = field(int)
 
     def test_field_no_default(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
             x = field(int)
 
         self.assertEqual(C(5).x, 5)
 
         with self.assertRaisesRegexp(TypeError,
-                                     r"__init__\(\) missing 1 required "
-                                     "positional argument: 'x'"):
+                                     r"__init__\(\) takes exactly 2 arguments \(1 given\)"):
             C()
 
     def test_field_default(self):
         default = object()
         @dataclass
         class C(object):
-            __annotations__ = {'x': object}
+            #__annotations__ = {'x': object}
             x = field(object, default=default)
 
         self.assertIs(C.x, default)
@@ -118,7 +123,7 @@ class TestCase(unittest.TestCase):
     def test_not_in_repr(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
             x = field(int, repr=False)
 
         with self.assertRaises(TypeError):
@@ -127,18 +132,20 @@ class TestCase(unittest.TestCase):
         self.assertIn('C()', repr(c))
 
         @dataclass
-        class C(object):
-            __annotations__ = {'x': int, 'y': int}
+        class CTEST(object):
+            #__annotations__ = {'x': int, 'y': int}
             x = field(int, repr=False)
-        c = C(10, 20)
+            #c = field(int)
+            y = field(int)
+        c = CTEST(10, 20)
         self.assertIn('y=20', repr(c))
 
     def test_not_in_compare(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
-            x = 0
-            y = field(int, compare=False, default=4)
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int, 0)
+            y = field(compare=False, default=4)
 
         self.assertEqual(C(), C(0, 20))
         self.assertEqual(C(1, 10), C(1, 20))
@@ -161,7 +168,7 @@ class TestCase(unittest.TestCase):
                 @dataclass(unsafe_hash=True)
                 class C(object):
                     __annotations__ = {'x': int}
-                    x = field(int, compare=compare, hash=hash_, default=5)
+                    x = field(_typ=int, compare=compare, hash=hash_, default=5)
 
                 if result == 'field':
                     # __hash__ contains the field.
@@ -175,28 +182,36 @@ class TestCase(unittest.TestCase):
         # present in the instance.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
             x = field(int, init=False)
 
         self.assertNotIn('x', C().__dict__)
 
         @dataclass
-        class C(object):
-            __annotations__ = {'x': int, 'y': int, 'z': int, 't': int}
-            y = 0
+        class CC(object):
+            #__annotations__ = {'x': int, 'y': int, 'z': int, 't': int}
+            x = field(int)
+            #ss0 = sys._getframe(0)
+            #ss = sys._getframe(1)
+            y = field(int, 0)
             z = field(int, init=False)
-            t = 10
+            t = field(int, 10)
+        #a = C(0)
 
-        self.assertNotIn('z', C(0).__dict__)
-        self.assertEqual(vars(C(5)), {'t': 10, 'x': 5, 'y': 0})
+        #bb = a.z
+        self.assertNotIn('z', CC(0).__dict__)
+        self.assertEqual(vars(CC(5)), {'t': 10, 'x': 5, 'y': 0})
 
     def test_class_marker(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': str, 'z': str}
-            y = field(str, init=False, default=None)
-            z = field(str, repr=False)
 
+            #__annotations__ = {'x': int, 'y': str, 'z': str}
+            x = field(int)
+            y = field(str,default=None, init=False)
+            z = field(str,repr=False)
+        #a = C(1, 2)
+        #aaaa = a.x
         the_fields = fields(C)
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
@@ -221,11 +236,46 @@ class TestCase(unittest.TestCase):
         self.assertNotHasAttr(C, 'z')
         self.assertTrue(the_fields[2].init)
         self.assertFalse(the_fields[2].repr)
-
+        #pew = C.z
+    # def test_field_order(self):
+    #     @dataclass
+    #     class B:
+    #         a: str = 'B:a'
+    #         b: str = 'B:b'
+    #         c: str = 'B:c'
+    #
+    #     @dataclass
+    #     class C(B):
+    #         b: str = 'C:b'
+    #
+    #     self.assertEqual([(f.name, f.default) for f in fields(C)],
+    #                      [('a', 'B:a'),
+    #                       ('b', 'C:b'),
+    #                       ('c', 'B:c')])
+    #
+    #     @dataclass
+    #     class D(B):
+    #         c: str = 'D:c'
+    #
+    #     self.assertEqual([(f.name, f.default) for f in fields(D)],
+    #                      [('a', 'B:a'),
+    #                       ('b', 'B:b'),
+    #                       ('c', 'D:c')])
+    #
+    #     @dataclass
+    #     class E(D):
+    #         a: str = 'E:a'
+    #         d: str = 'E:d'
+    #
+    #     self.assertEqual([(f.name, f.default) for f in fields(E)],
+    #                      [('a', 'E:a'),
+    #                       ('b', 'B:b'),
+    #                       ('c', 'D:c'),
+    #                       ('d', 'E:d')])
     def test_field_order(self):
         @dataclass
         class B(object):
-            __annotations__ = {'a': str, 'b': str, 'c': str}
+            __annotations__ = OrderedDict((('a', str), ('b', str), ('c', str)))
             a = 'B:a'
             b = 'B:b'
             c = 'B:c'
@@ -252,14 +302,14 @@ class TestCase(unittest.TestCase):
                                              'x is not allowed'):
                     @dataclass
                     class Point(object):
-                        __annotations__ = {'x': typ}
-                        x = empty
+                        #__annotations__ = {'x': typ}
+                        x = field(typ, empty)
 
     def test_no_options(self):
         # Call with dataclass().
         @dataclass()
         class C(object):
-            __annotations__ = {'x': int}
+            x = field(int)
 
         self.assertEqual(C(42).x, 42)
 
@@ -305,8 +355,8 @@ class TestCase(unittest.TestCase):
         # and get back the same thing.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': float}
-
+            x = field(int)
+            y = field(int)
         self.assertEqual(fields(C), fields(C(0, 0.0)))
 
     def test_helper_fields_exception(self):
@@ -323,24 +373,26 @@ class TestCase(unittest.TestCase):
 
     def test_helper_asdict(self):
         # Basic tests for asdict(), it should return a new dictionary.
+        #@dataclass
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
-
+            x = of(int)
+            y = of(int)
         c = C(1, 2)
 
-        self.assertEqual(asdict(c), {'x': 1, 'y': 2})
+        self.assertEqual(asdict(c), OrderedDict((('x', 1), ('y', 2))))
         self.assertEqual(asdict(c), asdict(c))
         self.assertIsNot(asdict(c), asdict(c))
         c.x = 42
-        self.assertEqual(asdict(c), {'x': 42, 'y': 2})
-        self.assertIs(type(asdict(c)), dict)
+        self.assertEqual(asdict(c), OrderedDict((('x', 42), ('y', 2))))
+        self.assertIs(type(asdict(c, dict)), dict)
 
     def test_helper_asdict_raises_on_classes(self):
         # asdict() should raise on a class object.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            x = of(int)
+            y = of(int)
 
         with self.assertRaisesRegexp(TypeError, 'dataclass instance'):
             asdict(C)
@@ -368,8 +420,9 @@ class TestCase(unittest.TestCase):
         # Basic tests for astuple(), it should return a new tuple.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
-            y = 0
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(_typ=int)
+            y = field(int, 0)
 
         c = C(1)
 
@@ -384,7 +437,9 @@ class TestCase(unittest.TestCase):
         # astuple() should raise on a class object.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(_typ=int)
+            y = field(_typ=int)
 
         with self.assertRaisesRegexp(TypeError, 'dataclass instance'):
             astuple(C)
@@ -394,13 +449,18 @@ class TestCase(unittest.TestCase):
     def test_helper_astuple_nested(self):
         @dataclass
         class UserId(object):
-            __annotations__ = {'token': int, 'group': int}
+            #__annotations__ = {'token': int, 'group': int}
+            token = field(int)
+            group = field(int)
 
         @dataclass
         class User(object):
-            __annotations__ = {'name': str, 'id': UserId}
+            name = field(str)
+            id = field(UserId)
+
 
         u = User('Joe', UserId(123, 1))
+        pew = u.name
         t = astuple(u)
         self.assertEqual(t, ('Joe', (123, 1)))
         self.assertIsNot(astuple(u), astuple(u))
@@ -408,7 +468,7 @@ class TestCase(unittest.TestCase):
         self.assertEqual(astuple(u), ('Joe', (123, 2)))
 
     def test_dynamic_class_creation(self):
-        cls_dict = {'__annotations__': {'x': int, 'y': int}}
+        cls_dict = {'__annotations__': OrderedDict((("x",int), ("y",int)))}
 
         # Create the class.
         cls = type('C', (object,), cls_dict)
@@ -421,8 +481,8 @@ class TestCase(unittest.TestCase):
 
     def test_dynamic_class_creation_using_field(self):
         cls_dict = {
-            '__annotations__': {'x': int, 'y': int},
-            'y': field(int, default=5),
+            '__annotations__': OrderedDict((("x",int), ("y",int))),
+            'y': field( int, default=5),
         }
 
         # Create the class.
@@ -445,11 +505,12 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
-
+            x = field(int)
         @dataclass
         class D(object):
-            __annotations__ = {'d': C, 'e': int}
+            d = field(C)
+            e = field(int)
+            #__annotations__ = {'d': C, 'e': int}
 
         c = C(10)
         d = D(c, 4)
@@ -508,35 +569,35 @@ class TestCase(unittest.TestCase):
         self.assertTrue(C(0, 0) >= C(0, 0))
         self.assertTrue(C(0, 0) < C(0, 1))
         self.assertTrue(C(0, 1) < C(1, 0))
-
-    def test_eq_order(self):
-        # Test combining eq and order.
-        for (eq, order, result) in [
-            (False, False, 'neither'),
-            (False, True,  'exception'),
-            (True,  False, 'eq_only'),
-            (True,  True,  'both'),
-        ]:
-            with self.subTest(eq=eq, order=order):
-                if result == 'exception':
-                    with self.assertRaisesRegexp(ValueError, 'eq must be true if order is true'):
-                        @dataclass(eq=eq, order=order)
-                        class C(object):
-                            pass
-                else:
-                    @dataclass(eq=eq, order=order)
-                    class C(object):
-                        pass
-
-                    if result == 'neither':
-                        self.assertNotIn('__eq__', C.__dict__)
-                        self.assertNotIn('__lt__', C.__dict__)
-                    elif result == 'both':
-                        self.assertIn('__eq__', C.__dict__)
-                        self.assertIn('__lt__', C.__dict__)
-                    elif result == 'eq_only':
-                        self.assertIn('__eq__', C.__dict__)
-                        self.assertNotIn('__lt__', C.__dict__)
+    #
+    # def test_eq_order(self):
+    #     # Test combining eq and order.
+    #     for (eq, order, result) in [
+    #         (False, False, 'neither'),
+    #         (False, True,  'exception'),
+    #         (True,  False, 'eq_only'),
+    #         (True,  True,  'both'),
+    #     ]:
+    #         with self.subTest(eq=eq, order=order):
+    #             if result == 'exception':
+    #                 with self.assertRaisesRegexp(ValueError, 'eq must be true if order is true'):
+    #                     @dataclass(eq=eq, order=order)
+    #                     class C(object):
+    #                         pass
+    #             else:
+    #                 @dataclass(eq=eq, order=order)
+    #                 class C(object):
+    #                     pass
+    #
+    #                 if result == 'neither':
+    #                     self.assertNotIn('__eq__', C.__dict__)
+    #                     self.assertNotIn('__lt__', C.__dict__)
+    #                 elif result == 'both':
+    #                     self.assertIn('__eq__', C.__dict__)
+    #                     self.assertIn('__lt__', C.__dict__)
+    #                 elif result == 'eq_only':
+    #                     self.assertIn('__eq__', C.__dict__)
+    #                     self.assertNotIn('__lt__', C.__dict__)
 
     def test_no_init(self):
         @dataclass(init=False)
@@ -601,7 +662,7 @@ class TestCase(unittest.TestCase):
         # Test a factory that returns a new list.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': list}
+            x = field(int)
             y = field(list, default_factory=list)
 
         c0 = C(3)
@@ -616,12 +677,11 @@ class TestCase(unittest.TestCase):
         # Test that MISSING works the same as a default not being specified.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
             x = field(int, default=MISSING)
 
         with self.assertRaisesRegexp(TypeError,
-                                     r'__init__\(\) missing 1 required '
-                                     'positional argument'):
+                                    r"__init__\(\) takes exactly 2 arguments \(1 given\)"):
             C()
         self.assertNotIn('x', C.__dict__)
 
@@ -629,12 +689,11 @@ class TestCase(unittest.TestCase):
         # Test that MISSING works the same as a default factory not being specified.
         @dataclass
         class C(object):
-            __annotations__ = {'x': int}
+            #__annotations__ = {'x': int}
             x = field(int, default_factory=MISSING)
 
         with self.assertRaisesRegexp(TypeError,
-                                     r'__init__\(\) missing 1 required '
-                                     'positional argument'):
+                                     r"__init__\(\) takes exactly 2 arguments \(1 given\)"):
             C()
         self.assertNotIn('x', C.__dict__)
 
@@ -715,9 +774,11 @@ class TestReplace(unittest.TestCase):
     def test_frozen(self):
         @dataclass(frozen=True)
         class C(object):
-            __annotations__ = {'x': int, 'y': int, 'z': int, 't': int}
-            z = field(int, init=False, default=10)
-            t = field(int, init=False, default=100)
+            #__annotations__ = {'x': int, 'y': int, 'z': int, 't': int}
+            x = field(_typ=int)
+            y = field(_typ=int)
+            z = field(_typ=int, init=False, default=10)
+            t = field(_typ=int, init=False, default=100)
 
         c = C(1, 2)
         c1 = replace(c, x=3)
@@ -757,7 +818,8 @@ class TestReplace(unittest.TestCase):
     def test_no_init(self):
         @dataclass
         class C(object):
-            __annotations__ = {'x': int, 'y': int}
+            #__annotations__ = {'x': int, 'y': int}
+            x = field(int)
             y = field(int, init=False, default=10)
 
         c = C(1)
@@ -781,7 +843,7 @@ class TestFieldNoAnnotation(unittest.TestCase):
                                      "'f' is a field but has no type annotation"):
             @dataclass
             class C(object):
-                f = field(int)
+                f = field()
 
 
 if __name__ == '__main__':

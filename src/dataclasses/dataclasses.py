@@ -1,3 +1,4 @@
+import functools
 import re
 import sys
 import copy
@@ -5,12 +6,12 @@ import types
 import inspect
 import keyword
 import itertools
-##from reprlib import recursive_repr
+from collections import OrderedDict
+
+from reprlib import recursive_repr, repr as actual_recursive_repr
 isidentifier = keyword.iskeyword
 from cheap_repr import cheap_repr
-lvl1 = lambda *args, **kwargs: lambda *args, **kwargs: cheap_repr(*args, **kwargs)
-lvl2 = lambda *args, **kwargs: lvl1
-recursive_repr = lvl2
+
 from dictproxyhack import dictproxy
 import typing
 MappingProxyType = dictproxy
@@ -133,6 +134,7 @@ class InitVar(object):
 # and only from the field() function, although Field instances are
 # exposed externally as (conceptually) read-only objects.
 class Field(object):
+    _counter = 0
     __slots__ = ('name',
                  'type',
                  'default',
@@ -144,13 +146,18 @@ class Field(object):
                  'metadata',
                  'kw_only',
                  'doc',
+                 'order',
                  '_field_type',  # Private: not to be used by user code.
                  )
 
+
     def __init__(self, default, default_factory, init, repr, hash, compare,
-                 metadata, kw_only, doc):
+                 metadata, kw_only, doc, **kwargs):
+        self.order = Field._counter
+        Field._counter += 1
+        #self.__annotations__["type"];
         self.name = None
-        self.type = None
+        #self.type = None
         self.default = default
         self.default_factory = default_factory
         self.init = init
@@ -166,9 +173,7 @@ class Field(object):
 
     @recursive_repr()
     def __repr__(self):
-        return ('Field('
-                'name={0!r},'
-                'type={1!r},'
+        return ('Field<{1!s}>(name=({0!r}),'
                 'default={2!r},'
                 'default_factory={3!r},'
                 'init={4!r},'
@@ -180,7 +185,7 @@ class Field(object):
                 'doc={10!r},'
                 '_field_type={11}'
                 ')').format(
-            self.name, self.type, self.default, self.default_factory,
+            self.name, self.type.__name__, self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
             self.metadata, self.kw_only, self.doc, self._field_type)
 
@@ -259,14 +264,17 @@ def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
     return Field(default, default_factory, init, repr, hash, compare,
                  metadata, kw_only, doc)
 
-
-
+def of(_typ):
+    return field(_typ)
+T = typing.TypeVar("T")
 def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, repr=True,
                 hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None):
+    # type: (typing.Type[T], typing.Optional[T], typing.Optional[typing.Callable[[], T]], bool, bool, typing.Optional[bool], bool, typing.Optional[bool], typing.Optional[typing.Mapping[typing.Any, typing.Any]], typing.Optional[str]) -> T
     """
 
     :rtype: dataclasses.Field
     """
+
     f = _field(default, default_factory, init, repr, hash, compare,
                   metadata, kw_only, doc)
     if _typ == MISSING and default != MISSING:
@@ -301,10 +309,10 @@ class _FuncBuilder(object):
         self.names = []
         self.src = []
         self.globals = globals
-        self.locals = {}
-        self.overwrite_errors = {}
-        self.unconditional_adds = {}
-        self.method_annotations = {}
+        self.locals = OrderedDict()
+        self.overwrite_errors = OrderedDict()
+        self.unconditional_adds = OrderedDict()
+        self.method_annotations = OrderedDict()
 
     def add_fn(self, name, args, body, locals=None, return_type=MISSING,
                overwrite_error=False, unconditional_add=False, decorator=None,
@@ -328,9 +336,12 @@ class _FuncBuilder(object):
 
         # Compute the text of the entire function, add it to the text we're generating.
         if decorator:
-            self.src.append(' {0}\n def {1}({2}):\n{3}'.format(decorator, name, args, body))
+            src = ' {0}\n def {1}({2}):\n{3}'.format(decorator, name, args, body)
+            self.src.append(src)
         else:
-            self.src.append(' def {0}({1}):\n{2}'.format(name, args, body))
+            src = ' def {0}({1}):\n{2}'.format(name, args, body)
+            self.src.append(src)
+        return src
 
     def add_fns_to_class(self, cls):
         # The source to all of the functions we're generating.
@@ -347,7 +358,7 @@ class _FuncBuilder(object):
             return_names = '({0},)'.format(','.join(self.names))
 
         txt = 'def __create_fn__({0}):\n{1}\n return {2}'.format(local_vars, fns_src, return_names)
-        ns = {}
+        ns = OrderedDict()
         exec(txt, self.globals, ns)
         fns = ns['__create_fn__'](**self.locals)
 
@@ -560,7 +571,7 @@ def _get_field(cls, a_name, a_type, default_kw_only):
         if isinstance(default, types.MemberDescriptorType):
             # This is a field in __slots__, so it has no default value.
             default = MISSING
-        f = field(default=default)
+        f = field(default=default, _typ=a_type)
 
     # Only at this point do we know the name and the type.  Set them.
     f.name = a_name
@@ -655,30 +666,39 @@ _hash_action = {(False, False, False, False): None,
                 (True,  True,  True,  True ): _hash_exception,
                 }
 
-
 def collect_annotations(cls):
-    ret = {}
-    for name, value in cls.__dict__.items():
+    items = []
+    #i = 0
+    for name, value in cls.__dict__.iteritems():
         if isinstance(value, Field):
-            if value.type is None:
-                raise TypeError('{0!r} is a field but has no type annotation'.format(name))
-            else:
-                ret[name] = value.type
+            t = value.type
+            if t is None:
+                raise TypeError(
+                    '{0!r} is a field but has no type annotation'.format(name)
+                )
+            items.append((value.order, name, t))
+        # elif not name.startswith("__"):
+        #     # TODO: warning here, we shouldn't allow implicit typing
+        #     t = type(value)
+        #     items.append((i, name, t))
+        # i += 1
 
 
+
+    items.sort(key=lambda x: x[0])  # sort by descriptor order
+
+    ret = OrderedDict((name, t) for _, name, t in items)
     return ret
-
-
 
 
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
-    fields = {}
+    fields = OrderedDict()
 
     if cls.__module__ in sys.modules:
         globals = sys.modules[cls.__module__].__dict__
     else:
-        globals = {}
+        globals = OrderedDict()
 
     setattr(cls, _PARAMS, _DataclassParams(init, repr, eq, order,
                                            unsafe_hash, frozen,
@@ -701,7 +721,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             any_frozen_base = any_frozen_base or current_frozen
 
     # Get annotations - in Python 2.7 we expect this to be set by external lib
-    cls_annotations = getattr(cls, '__annotations__', {})
+    cls_annotations = getattr(cls, '__annotations__', OrderedDict())
 
     # Now find fields in our class.
     cls_fields = []
@@ -732,7 +752,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Do we have any Field members that don't also have annotations?
     for name, value in cls.__dict__.items():
-        if isinstance(value, Field) and value.type is None and not name in cls_annotations:
+        if ((isinstance(value, Field) and value.type is None)) and not name in cls_annotations:
             raise TypeError('{0!r} is a field but has no type annotation'.format(name))
 
     # Check rules that apply if we are derived from any dataclasses.
@@ -785,16 +805,27 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     if repr:
         flds = [f for f in field_list if f.repr]
-        repr_fmt = ', '.join(['{0}={{self.{0}!r}}'.format(f.name) for f in flds])
-        func_builder.add_fn('__repr__',
+        repr_fmt = ', '.join(['{0}={{{1}!r}}'.format(f.name, flds.index(f)) for f in flds])
+
+        #if flds:
+        body = ['  return "{0}({1})".format({2})'.format(
+            cls.__name__,
+            repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
+            ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
+        ).replace(".format()", "")]
+        if flds:
+            decorator="@__dataclasses_recursive_repr()"
+        else:
+            decorator = None
+        #else:
+        #    body = ['  return __dataclasses_actual_recursive_repr(self)']
+        #    decorator=None
+        f = func_builder.add_fn('__repr__',
                             ('self',),
-                            ['  return "{0}({1})".format({2})'.format(
-                                cls.__name__,
-                                repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{self.', '{self.').replace('!r}}', '!r}'),
-                                ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
-                            )],
-                            locals={'__dataclasses_recursive_repr':  recursive_repr},
-                            decorator="@__dataclasses_recursive_repr()")
+                            body,
+                            locals={'__dataclasses_recursive_repr':  recursive_repr, '__dataclasses_actual_recursive_repr': actual_recursive_repr},
+                            decorator=decorator)
+        _set_new_attribute(cls, "reprbody", f)
 
     if eq:
         # Create __eq__ method.
@@ -824,6 +855,21 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering')
+    else:
+        # Mimic python 3's type errors while comparing different types
+        #flds = [f for f in field_list if f.compare]
+        #self_tuple = _tuple_str('self', flds)
+        #other_tuple = _tuple_str('other', flds)
+        for name, op in [('__lt__', '<'),
+                         ('__le__', '<='),
+                         ('__gt__', '>'),
+                         ('__ge__', '>=')]:
+            func_builder.add_fn(name,
+                                ('self', 'other'),
+                                ['  if other.__class__ is self.__class__:',
+                                 '   raise TypeError("not supported between instances")',
+                                 '  raise TypeError("Mismatched types")'],
+                                overwrite_error='not supported between instances')
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -846,7 +892,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             cls.__doc__ = ""
             # Create a class doc-string.
             try:
-                text_sig = str(inspect.signature(cls)).replace(' -> None', '')
+                text_sig = str(collect_annotations(cls)).replace(' -> None', '')
             except (TypeError, ValueError, AttributeError):
                 text_sig = ''
             cls.__doc__ = cls.__name__ + text_sig
@@ -914,7 +960,7 @@ def _update_func_cell_for__class__(f, oldcls, newcls):
 def _create_slots(defined_fields, inherited_slots, field_names, weakref_slot):
     # The slots for our class.
     seen_docs = False
-    slots = {}
+    slots = OrderedDict()
 
     items_to_check = list(field_names)
     if weakref_slot:
@@ -991,8 +1037,10 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
 
     return newcls
 
-def annotate(**kwargs):
+def annotate(__annotations__, **kwargs):
     """Python 3 compatible function annotation for Python 2."""
+    if __annotations__ and not kwargs:
+        kwargs = __annotations__
     if not kwargs:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
@@ -1000,7 +1048,7 @@ def annotate(**kwargs):
             for k, v in kwargs.items():
                 f.__annotations__[k] = v
         else:
-            f.__annotations__ = kwargs
+            f.__annotations__ = OrderedDict(kwargs)
         return f
     return dec
 
@@ -1024,7 +1072,7 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     def wrap(cls):
         annotations = collect_annotations(cls)
         if annotations:
-            annotate(**annotations)(cls)
+            annotate(__annotations__=annotations)(cls)
 
         return _process_class(cls, init, repr, eq, order, unsafe_hash,
                               frozen, match_args, kw_only, slots,
@@ -1068,7 +1116,7 @@ def is_dataclass(obj):
     return hasattr(cls, _FIELDS)
 
 
-def asdict(obj, dict_factory=dict):
+def asdict(obj, dict_factory=OrderedDict):
     """Return the fields of a dataclass instance as a new dictionary mapping
     field names to field values.
 
@@ -1218,12 +1266,12 @@ def make_dataclass(cls_name, fields, bases=(), namespace=None, init=True,
         decorator = dataclass
 
     if namespace is None:
-        namespace = {}
+        namespace = OrderedDict()
 
     # Validate field names
     seen = set()
-    annotations = {}
-    defaults = {}
+    annotations = OrderedDict()
+    defaults = OrderedDict()
     for item in fields:
         if isinstance(item, str):
             name = item
