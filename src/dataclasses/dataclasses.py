@@ -1,3 +1,4 @@
+from __future__ import print_function ##, absolute_import
 import abc
 import functools
 import re
@@ -188,21 +189,21 @@ class Field(object):
 
     @recursive_repr()
     def __repr__(self):
-        return ('{12!s}<{1!s}>(name=({0!r}),'
-                'default={2!r},'
-                'default_factory={3!r},'
-                'init={4!r},'
-                'repr={5!r},'
-                'hash={6!r},'
-                'compare={7!r},'
-                'metadata={8!r},'
-                'kw_only={9!r},'
-                'doc={10!r},'
-                '_field_type={11}'
-                ')').format(
-            self.name, self.type.__name__, self.default, self.default_factory,
+        return ('{12!s}<{1!s}>(name=({0!r}),' +
+            ('default={2!r},' if self.default is not MISSING else "") +
+            ('default_factory={3!r},' if self.default_factory is not MISSING else "") +
+            ('init={4!r},' if self.init else "" ) +
+            ('repr={5!r},' if self.repr else "" ) +
+            ('hash={6!r},' if self.hash else "" ) +
+            ('compare={7!r},' if self.compare else "" ) +
+            ('metadata={8!r},' if self.metadata else "" ) +
+            ('kw_only={9!r},' if self.kw_only else "" ) +
+            ('doc={10!r},' if self.doc else "" ) +
+            ('_field_type={11}' if self._field_type is not MISSING else "" ) +
+            ')').format(
+            self.name, getattr(self.type, "__name__", self.type.__class__.__name__), self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
-            self.metadata, self.kw_only, self.doc, self._field_type, self.__class__)
+            self.metadata, self.kw_only, self.doc, self._field_type, self.__class__.__module__ +"."+self.__class__.__name__)
 
     def __set_name__(self, owner, name):
         func = getattr(type(self.default), '__set_name__', None)
@@ -611,7 +612,12 @@ def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
         else:
             # Look up module_name in the class's module.
             module = sys.modules.get(cls.__module__)
-            if module and module.__dict__.get(module_name) is a_module:
+            m1 = module.__dict__.get(module_name)
+            if m1:
+                m2 = m1.__dict__.get(module_name)
+            else:
+                m2 = None
+            if module and (m1 is a_module or m2 is a_module):
                 ns = sys.modules.get(a_type.__module__).__dict__
         if ns and is_type_predicate(ns.get(match.group(2)), a_module):
             return True
@@ -652,6 +658,8 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # Check for InitVar
     if f._field_type is _FIELD:
         dataclasses = sys.modules[__name__]
+        if cls.__name__ == "CSSS":
+            pass
         if (_is_initvar(a_type, dataclasses)
                 or (isinstance(f.type, str)
                     and _is_type(f.type, cls, dataclasses, dataclasses.InitVar,
@@ -941,7 +949,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                 ('self', 'other'),
                                 ['  if other.__class__ is self.__class__:',
                                  '   raise TypeError("not supported between instances")',
-                                 '  raise TypeError("Mismatched types")'],
+                                 '  raise TypeError("not supported between instances of {} and {}".format(other.__class__.__name__, self.__class__.__name__))'],
                                 overwrite_error='not supported between instances'))
 
     if frozen:
@@ -1381,7 +1389,7 @@ def make_dataclass(
 
         if not isinstance(name, str) or not isidentifier(name):
             raise TypeError('Field names must be valid identifiers: {0!r}'.format(name))
-        if keyword.iskeyword(name):
+        if keyword.iskeyword(name) and name != "print":
             raise TypeError('Field names must not be keywords: {0!r}'.format(name))
         if name in seen:
             raise TypeError('Field name duplicated: {0!r}'.format(name))
