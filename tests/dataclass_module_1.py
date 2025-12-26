@@ -14,7 +14,7 @@ T_IV2 = dataclasses.InitVar[int]
 T_IV3 = dataclasses.InitVar
 
 @dataclasses.dataclass
-class CV:
+class CV(object):
     T_CV4 = typing.ClassVar
     cv0 = dataclasses.field(20)
     cv1 = dataclasses.field(typing.ClassVar, 30)
@@ -23,7 +23,7 @@ class CV:
     not_cv4 = T_CV4  # When using string annotations, this field is not recognized as a ClassVar.
 
 @dataclasses.dataclass
-class IV:
+class IV(object):
     T_IV4 = dataclasses.InitVar
     iv0 = dataclasses.InitVar[int]
     iv1 = dataclasses.InitVar

@@ -14,6 +14,7 @@ __all__ = ['dataclass',
            'make_dataclass',
            'replace',
            'is_dataclass',
+            '_oneshot'
            #  'of_factory',
            # 'of_typed',
            # 'ann',
@@ -22,4 +23,4 @@ __all__ = ['dataclass',
            ]
 
 from dataclasses import dataclass, field, Field, FrozenInstanceError, InitVar, KW_ONLY, MISSING, fields, asdict, \
-    astuple, make_dataclass, replace, is_dataclass, of # of_factory, of_typed, ann, IntField, typed
+    astuple, make_dataclass, replace, is_dataclass, of, _oneshot  # of_factory, of_typed, ann, IntField, typed

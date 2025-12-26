@@ -1,3 +1,4 @@
+import abc
 import functools
 import re
 import sys
@@ -6,12 +7,14 @@ import types
 import inspect
 import keyword
 import itertools
+import weakref
 from collections import OrderedDict
 
+from abc_utils import update_abstractmethods
 from reprlib import recursive_repr, repr as actual_recursive_repr
 from string_utils import isidentifier
 from cheap_repr import cheap_repr
-
+from class_utils import is_descriptor
 from dictproxyhack import dictproxy
 import typing
 MappingProxyType = dictproxy
@@ -113,8 +116,16 @@ _ATOMIC_TYPES = frozenset({
 # without importing `typing` module.
 _ANY_MARKER = object()
 
+class _GenericMeta(abc.ABCMeta):
+
+    def __getitem__(cls, typ):
+        n = type("{}[{}]".format(cls.__name__, typ.__name__), (cls,), {"__origin__":weakref.ref(cls), "__parameters__":typ})
+
+        return n
+#f = typing.GenericMeta
 
 class InitVar(object):
+    __metaclass__ = _GenericMeta
     __slots__ = ('type',)
 
     def __init__(self, type_):
@@ -137,6 +148,7 @@ class InitVar(object):
 # and only from the field() function, although Field instances are
 # exposed externally as (conceptually) read-only objects.
 class Field(object):
+    """"""
     _counter = 0
     __slots__ = ('name',
                  'type',
@@ -176,7 +188,7 @@ class Field(object):
 
     @recursive_repr()
     def __repr__(self):
-        return ('Field<{1!s}>(name=({0!r}),'
+        return ('{12!s}<{1!s}>(name=({0!r}),'
                 'default={2!r},'
                 'default_factory={3!r},'
                 'init={4!r},'
@@ -190,7 +202,7 @@ class Field(object):
                 ')').format(
             self.name, self.type.__name__, self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
-            self.metadata, self.kw_only, self.doc, self._field_type)
+            self.metadata, self.kw_only, self.doc, self._field_type, self.__class__)
 
     def __set_name__(self, owner, name):
         func = getattr(type(self.default), '__set_name__', None)
@@ -245,7 +257,7 @@ class _DataclassParams(object):
 
 
 def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
-          hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None):
+          hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, _cls=Field):
     """Return an object to identify dataclass fields.
 
     default is the default value of the field.  default_factory is a
@@ -264,28 +276,72 @@ def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
 
     if default is not MISSING and default_factory is not MISSING:
         raise ValueError('cannot specify both default and default_factory')
-    return Field(default, default_factory, init, repr, hash, compare,
+    return _cls(default, default_factory, init, repr, hash, compare,
                  metadata, kw_only, doc)
 
 def of(_typ):
-    return field(_typ)
+    return _typ
+    #return field(_typ)
 T = typing.TypeVar("T")
 def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, repr=True,
-                hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None):
+                hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, **kwargs):
     # type: (typing.Type[T], typing.Optional[T], typing.Optional[typing.Callable[[], T]], bool, bool, typing.Optional[bool], bool, typing.Optional[bool], typing.Optional[typing.Mapping[typing.Any, typing.Any]], typing.Optional[str]) -> T
     """
 
     :rtype: dataclasses.Field
     """
-
+    mode = kwargs["mode"] if "mode" in kwargs else 1
     f = _field(default, default_factory, init, repr, hash, compare,
-                  metadata, kw_only, doc)
+                  metadata, kw_only, doc, _cls=_oneshot if mode == 1 else Field)
     if _typ == MISSING and default != MISSING:
         _typ = type(default)
 
     #object.__setattr__(f, "_value_type", _typ)
     f.type = _typ
     return f
+
+
+# WIP descriptor delegation
+class _oneshot(Field):
+    def __get__(self, instance, owner):
+        if hasattr(self.default, "__get__"):
+            v = self.default.__get__(instance, owner)
+        else:
+            if not instance:
+                v = self
+            elif self.name and hasattr(instance, self.name):
+                v = object.__getattribute__(self, self.name)
+            else:
+                v = self.default or self.default_factory()
+        return v
+
+    def __set__(self, instance, value):
+        if hasattr(self.default, "__set__"):
+            # descriptor
+            self.default.__set__(instance, value)
+        elif hasattr(type(self.default), "__set__"):
+            # descriptor
+            type(self.default).__set__(instance, value)
+        elif self.default is value:
+            #type(self.default)
+            #
+            pass
+        else:
+            raise RuntimeError()
+            #f_name = filter(lambda v: v[1] == self, instance.__class__.__dict__.items())
+            #if f_name:
+            #    setattr(instance, "_{}".format(f_name[0][0]), value)
+
+        #else:
+        #    raise RuntimeError()
+        #object.__setattr__(instance)
+        #self.default.__set__(instance, value)
+
+    def __set_name__(self, owner, name):
+        #super(Field).__set_name__(self)
+        Field.__set_name__(self, owner, name)
+        self.name = name
+    #     pass
 
 def _fields_in_init_order(fields):
     # Returns the fields as __init__ will output them.  It returns 2 tuples:
@@ -344,7 +400,7 @@ class _FuncBuilder(object):
         else:
             src = ' def {0}({1}):\n{2}'.format(name, args, body)
             self.src.append(src)
-        return src
+        return name, src
 
     def add_fns_to_class(self, cls):
         # The source to all of the functions we're generating.
@@ -510,14 +566,14 @@ def _frozen_get_del_attr(cls, fields, func_builder):
     if fields:
         condition += ' or name in {' + ', '.join(repr(f.name) for f in fields) + '}'
 
-    _set_new_attribute(cls,"setattrfun", func_builder.add_fn('__setattr__',
+    attach_debug_function(cls, *func_builder.add_fn('__setattr__',
                         ('self', 'name', 'value'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
                          '  super(cls, self).__setattr__(name, value)'),
                         locals=locals,
                         overwrite_error=True))
-    _set_new_attribute(cls,"delattrfun",func_builder.add_fn('__delattr__',
+    attach_debug_function(cls, *func_builder.add_fn('__delattr__',
                         ('self', 'name'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
@@ -577,7 +633,8 @@ def _get_field(cls, a_name, a_type, default_kw_only):
         f = field(default=default, _typ=a_type)
 
     # Only at this point do we know the name and the type.  Set them.
-    f.name = a_name
+    #f.name = a_name
+    f.__set_name__(cls, a_name)
     f.type = a_type
 
     # Assume it's a normal field until proven otherwise.
@@ -639,10 +696,10 @@ def _hash_set_none(cls, fields, func_builder):
 def _hash_add(cls, fields, func_builder):
     flds = [f for f in fields if (f.compare if f.hash is None else f.hash)]
     self_tuple = _tuple_str('self', flds)
-    func_builder.add_fn('__hash__',
+    attach_debug_function(cls, *func_builder.add_fn('__hash__',
                         ('self',),
                         ['  return hash({0})'.format(self_tuple)],
-                        unconditional_add=True)
+                        unconditional_add=True))
 
 
 def _hash_exception(cls, fields, func_builder):
@@ -671,7 +728,7 @@ _hash_action = {(False, False, False, False): None,
 
 def collect_annotations(cls):
     items = []
-    #i = 0
+    i = 0
     for name, value in cls.__dict__.iteritems():
         if isinstance(value, Field):
             t = value.type
@@ -679,7 +736,14 @@ def collect_annotations(cls):
                 raise TypeError(
                     '{0!r} is a field but has no type annotation'.format(name)
                 )
+            value.__set_name__(cls, name)
             items.append((value.order, name, t))
+            i = value.order
+        # elif is_descriptor(value):
+        #     # TODO: warning here, we shouldn't allow implicit typing
+        #     t = type(value)
+        #     items.append((i, name, t))
+        # i += 1
         # elif not name.startswith("__"):
         #     # TODO: warning here, we shouldn't allow implicit typing
         #     t = type(value)
@@ -693,6 +757,9 @@ def collect_annotations(cls):
     ret = OrderedDict((name, t) for _, name, t in items)
     return ret
 
+def attach_debug_function(cls, fname, f):
+    _set_new_attribute(cls, "fn_bodies", {})
+    cls.fn_bodies[fname] = f
 
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
@@ -793,7 +860,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         # Does this class have a post-init function?
         has_post_init = hasattr(cls, _POST_INIT_NAME)
 
-        i = _init_fn(all_init_fields,
+        attach_debug_function(cls, *_init_fn(all_init_fields,
                  std_init_fields,
                  kw_only_init_fields,
                  frozen,
@@ -801,8 +868,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                  '__dataclass_self__' if 'self' in fields else 'self',
                  func_builder,
                  slots,
-                 )
-        _set_new_attribute(cls, "initbody", i)
+                 ))
+
 
     _set_new_attribute(cls, '__replace__', _replace)
 
@@ -826,25 +893,25 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         #else:
         #    body = ['  return __dataclasses_actual_recursive_repr(self)']
         #    decorator=None
-        f = func_builder.add_fn('__repr__',
+        attach_debug_function(cls, *func_builder.add_fn('__repr__',
                             ('self',),
                             body,
                             locals={'__dataclasses_recursive_repr':  recursive_repr, '__dataclasses_actual_recursive_repr': actual_recursive_repr},
-                            decorator=decorator)
-        _set_new_attribute(cls, "reprbody", f)
+                            decorator=decorator))
+        #_set_new_attribute(cls, "reprbody", f)
 
     if eq:
         # Create __eq__ method.
         cmp_fields = [field for field in field_list if field.compare]
         terms = ['self.{0}==other.{0}'.format(field.name) for field in cmp_fields]
         field_comparisons = ' and '.join(terms) or 'True'
-        func_builder.add_fn('__eq__',
+        attach_debug_function(cls, *func_builder.add_fn('__eq__',
                             ('self', 'other'),
                             ['  if self is other:',
                              '   return True',
                              '  if other.__class__ is self.__class__:',
                              '   return {0}'.format(field_comparisons),
-                             '  return NotImplemented'])
+                             '  return NotImplemented']))
 
     if order:
         # Create and set the ordering methods.
@@ -855,12 +922,12 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
-            func_builder.add_fn(name,
+            attach_debug_function(cls, *func_builder.add_fn(name,
                                 ('self', 'other'),
                                 ['  if other.__class__ is self.__class__:',
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
-                                overwrite_error='Consider using functools.total_ordering')
+                                overwrite_error='Consider using functools.total_ordering'))
     else:
         # Mimic python 3's type errors while comparing different types
         #flds = [f for f in field_list if f.compare]
@@ -870,12 +937,12 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
-            func_builder.add_fn(name,
+            attach_debug_function(cls, *func_builder.add_fn(name,
                                 ('self', 'other'),
                                 ['  if other.__class__ is self.__class__:',
                                  '   raise TypeError("not supported between instances")',
                                  '  raise TypeError("Mismatched types")'],
-                                overwrite_error='not supported between instances')
+                                overwrite_error='not supported between instances'))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -891,17 +958,19 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
 
-    if not getattr(cls, '__doc__'):
-        if cls.__doc__ is None:
-            pass
-        else:
-            cls.__doc__ = ""
-            # Create a class doc-string.
-            try:
-                text_sig = str(collect_annotations(cls)).replace(' -> None', '')
-            except (TypeError, ValueError, AttributeError):
-                text_sig = ''
-            cls.__doc__ = cls.__name__ + text_sig
+    doc_attr = getattr(cls, '__doc__')
+    if doc_attr is None:
+        doc_string = ""
+    else:
+        doc_string = cls.__doc__
+    # Create a class doc-string.
+    try:
+        text_sig = str(", ".join("{}: {!s}".format(k, t.__name__) for k, t in cls.__annotations__.items())).replace(' -> None', '')
+    except (TypeError, ValueError, AttributeError):
+        text_sig = ''
+    doc_string = cls.__name__ + text_sig + doc_string
+    if doc_attr is not None:
+        cls.__doc__ = doc_string
 
     if match_args:
         _set_new_attribute(cls, '__match_args__',
@@ -912,7 +981,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         raise TypeError('weakref_slot is True but slots is False')
     if slots:
         cls = _add_slots(cls, frozen, weakref_slot, fields)
-
+    #abc.abstractmethod()
+    update_abstractmethods(cls)
     return cls
 
 
