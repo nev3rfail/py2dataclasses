@@ -1336,6 +1336,163 @@ class TestCase(unittest.TestCase):
         self.assertFalse(c.b_called)
         self.assertTrue(c.c_called)
 
+    def test_field_metadata_default(self):
+        @dataclass
+        class C(object):
+            i = field(int)
+
+        self.assertFalse(fields(C)[0].metadata)
+        self.assertEqual(len(fields(C)[0].metadata), 0)
+        with self.assertRaisesRegexp(TypeError,
+                                    'does not support item assignment'):
+            fields(C)[0].metadata['test'] = 3
+
+    def test_field_metadata_mapping(self):
+        with self.assertRaises(TypeError):
+            @dataclass
+            class C(object):
+                i = field(int, metadata=0)
+
+        d = {}
+        @dataclass
+        class C(object):
+            i = field(int, metadata=d)
+        self.assertFalse(fields(C)[0].metadata)
+        self.assertEqual(len(fields(C)[0].metadata), 0)
+        d['foo'] = 1
+        self.assertEqual(len(fields(C)[0].metadata), 1)
+        self.assertEqual(fields(C)[0].metadata['foo'], 1)
+        with self.assertRaisesRegexp(TypeError,
+                                    'does not support item assignment'):
+            fields(C)[0].metadata['test'] = 3
+
+        d = {'test': 10, 'bar': '42', 3: 'three'}
+        @dataclass
+        class C(object):
+            i = field(int, metadata=d)
+        self.assertEqual(len(fields(C)[0].metadata), 3)
+        self.assertEqual(fields(C)[0].metadata['test'], 10)
+        self.assertEqual(fields(C)[0].metadata['bar'], '42')
+        self.assertEqual(fields(C)[0].metadata[3], 'three')
+        d['foo'] = 1
+        self.assertEqual(len(fields(C)[0].metadata), 4)
+        self.assertEqual(fields(C)[0].metadata['foo'], 1)
+        with self.assertRaises(KeyError):
+            fields(C)[0].metadata['baz']
+        with self.assertRaisesRegexp(TypeError,
+                                    'does not support item assignment'):
+            fields(C)[0].metadata['test'] = 3
+
+    def test_field_metadata_custom_mapping(self):
+        # Try a custom mapping.
+        class SimpleNameSpace(object):
+            def __init__(self, **kw):
+                self.__dict__.update(kw)
+
+            def __getitem__(self, item):
+                if item == 'xyzzy':
+                    return 'plugh'
+                return getattr(self, item)
+
+            def __len__(self):
+                return self.__dict__.__len__()
+
+        @dataclass
+        class C(object):
+            i = field(int, metadata=SimpleNameSpace(a=10))
+
+        self.assertEqual(len(fields(C)[0].metadata), 1)
+        self.assertEqual(fields(C)[0].metadata['a'], 10)
+        with self.assertRaises(AttributeError):
+            fields(C)[0].metadata['b']
+        # Make sure we're still talking to our custom mapping.
+        self.assertEqual(fields(C)[0].metadata['xyzzy'], 'plugh')
+
+    def test_generic_dataclasses(self):
+        from typing import TypeVar, List
+        T = TypeVar('T')
+
+        @dataclass
+        class LabeledBox(object):
+            content = field(T)
+            label = field(str, 'unknown')
+
+        box = LabeledBox(42)
+        self.assertEqual(box.content, 42)
+        self.assertEqual(box.label, 'unknown')
+
+    def test_generic_extending(self):
+        from typing import TypeVar
+        S = TypeVar('S')
+        T = TypeVar('T')
+
+        @dataclass
+        class Base(object):
+            x = field(T)
+            y = field(S)
+
+        @dataclass
+        class DataDerived(Base):
+            new_field = field(str)
+
+        c = DataDerived(0, 'test1', 'test2')
+        self.assertEqual(astuple(c), (0, 'test1', 'test2'))
+
+    def test_generic_dynamic(self):
+        from typing import TypeVar, Optional
+        T = TypeVar('T')
+
+        @dataclass
+        class Parent(object):
+            x = field(T)
+
+        Child = make_dataclass('Child', [('y', T), ('z', Optional(T), None)],
+                               bases=(Parent,), namespace={'other': 42})
+        c = Child(1, 2)
+        self.assertIsNone(c.z)
+        c2 = Child(1, 2, 3)
+        self.assertEqual(c2.z, 3)
+        self.assertEqual(c2.other, 42)
+
+    def test_dataclasses_pickleable(self):
+        @dataclass
+        class P(object):
+            x = field(int)
+            y = field(int, 0)
+
+        @dataclass
+        class Q(object):
+            x = field(int)
+            y = field(int, default=0, init=False)
+
+        @dataclass
+        class R(object):
+            x = field(int)
+            y = field(list, default_factory=list)
+
+        q = Q(1)
+        q.y = 2
+        samples = [P(1), P(1, 2), Q(1), q, R(1), R(1, [2, 3, 4])]
+        for sample in samples:
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(sample=sample, proto=proto):
+                    new_sample = pickle.loads(pickle.dumps(sample, proto))
+                    self.assertEqual(sample.x, new_sample.x)
+                    self.assertEqual(sample.y, new_sample.y)
+                    self.assertIsNot(sample, new_sample)
+                    new_sample.x = 42
+                    another_new_sample = pickle.loads(pickle.dumps(new_sample, proto))
+                    self.assertEqual(new_sample.x, another_new_sample.x)
+                    self.assertEqual(sample.y, another_new_sample.y)
+
+    def test_dataclasses_qualnames(self):
+        @dataclass(order=True, unsafe_hash=True, frozen=True)
+        class A(object):
+            x = field(int)
+            y = field(int)
+
+        self.assertEqual(A.__qualname__, 'TestCase.test_dataclasses_qualnames.<locals>.A')
+
 
 class TestMakeDataclass(unittest.TestCase):
     def test_simple(self):
@@ -1398,6 +1555,36 @@ class TestMakeDataclass(unittest.TestCase):
         C = make_dataclass('Point', ['x', ('y', int), 'z'])
         c = C(1, 2, 3)
         self.assertEqual(vars(c), {'x': 1, 'y': 2, 'z': 3})
+
+    def test_init_var(self):
+        from dataclasses import InitVar
+        def post_init(self, y):
+            self.x *= y
+
+        C = make_dataclass('C',
+                           [('x', int),
+                            ('y', InitVar(int)),
+                            ],
+                           namespace={'__post_init__': post_init},
+                           )
+        c = C(2, 3)
+        self.assertEqual(vars(c), {'x': 6})
+        self.assertEqual(len(fields(c)), 1)
+
+    def test_class_var(self):
+        from typing import ClassVar
+        C = make_dataclass('C',
+                           [('x', int),
+                            ('y', ClassVar(int), 10),
+                            ],
+                           )
+
+        self.assertEqual(C.y, 10)
+        self.assertEqual(len(fields(C)), 1)
+
+        c = C(5)
+        self.assertEqual(c.x, 5)
+        self.assertEqual(C.y, 10)
 
 
 class TestReplace(unittest.TestCase):
