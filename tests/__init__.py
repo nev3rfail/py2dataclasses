@@ -1717,6 +1717,387 @@ class TestDescriptors(unittest.TestCase):
             c = C()
 
 
+class TestSlots(unittest.TestCase):
+    def test_simple(self):
+        @dataclass
+        class C(object):
+            __slots__ = ('x',)
+            x = field(int)
+
+        # There was a bug where a variable in a slot was assumed to
+        #  also have a default value (of type
+        #  types.MemberDescriptorType).
+        with self.assertRaisesRegexp(TypeError,
+                                    r"__init__\(\) missing 1 required positional argument"):
+            C()
+
+        # We can create an instance, and assign to x.
+        c = C(10)
+        self.assertEqual(c.x, 10)
+        c.x = 5
+        self.assertEqual(c.x, 5)
+
+        # We can't assign to anything else.
+        with self.assertRaisesRegexp(AttributeError, "'C' object has no attribute 'y'"):
+            c.y = 5
+
+    def test_derived_added_field(self):
+        # See bpo-33100.
+        @dataclass
+        class Base(object):
+            __slots__ = ('x',)
+            x = field(int)
+
+        @dataclass
+        class Derived(Base):
+            x = field(int)
+            y = field(int)
+
+        d = Derived(1, 2)
+        self.assertEqual((d.x, d.y), (1, 2))
+
+        # We can add a new field to the derived instance.
+        d.z = 10
+
+
+    def test_frozen_pickle(self):
+        # This test uses frozen=True with slots=True which may not be supported
+        # Create some test classes for pickling
+        @dataclass(frozen=True, slots=True)
+        class FrozenSlotsClass(object):
+            #__slots__ = ('foo', 'bar')
+            foo = field(str)
+            bar = field(int)
+
+        @dataclass(frozen=True)
+        class FrozenWithoutSlotsClass(object):
+            foo = field(str)
+            bar = field(int)
+
+        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(proto=proto):
+                obj = FrozenSlotsClass("a", 1)
+                p = pickle.loads(pickle.dumps(obj, protocol=proto))
+                self.assertIsNot(obj, p)
+                self.assertEqual(obj, p)
+
+                obj = FrozenWithoutSlotsClass("a", 1)
+                p = pickle.loads(pickle.dumps(obj, protocol=proto))
+                self.assertIsNot(obj, p)
+                self.assertEqual(obj, p)
+
+    def test_frozen_slots_pickle_custom_state(self):
+        # This test uses __getstate__ and __setstate__ with frozen slots
+        @dataclass(frozen=True)
+        class FrozenSlotsGetStateClass(object):
+            __slots__ = ('foo', 'bar', 'getstate_called')
+            foo = field(str)
+            bar = field(int)
+            getstate_called = field(bool, default=False, compare=False)
+
+            def __getstate__(self):
+                object.__setattr__(self, 'getstate_called', True)
+                return [self.foo, self.bar]
+
+        @dataclass(frozen=True)
+        class FrozenSlotsSetStateClass(object):
+            __slots__ = ('foo', 'bar', 'setstate_called')
+            foo = field(str)
+            bar = field(int)
+            setstate_called = field(bool, default=False, compare=False)
+
+            def __setstate__(self, state):
+                object.__setattr__(self, 'setstate_called', True)
+                object.__setattr__(self, 'foo', state[0])
+                object.__setattr__(self, 'bar', state[1])
+
+        @dataclass(frozen=True)
+        class FrozenSlotsAllStateClass(object):
+            __slots__ = ('foo', 'bar', 'getstate_called', 'setstate_called')
+            foo = field(str)
+            bar = field(int)
+            getstate_called = field(bool, default=False, compare=False)
+            setstate_called = field(bool, default=False, compare=False)
+
+            def __getstate__(self):
+                object.__setattr__(self, 'getstate_called', True)
+                return [self.foo, self.bar]
+
+            def __setstate__(self, state):
+                object.__setattr__(self, 'setstate_called', True)
+                object.__setattr__(self, 'foo', state[0])
+                object.__setattr__(self, 'bar', state[1])
+
+        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(proto=proto):
+                obj = FrozenSlotsGetStateClass('a', 1)
+                dumped = pickle.dumps(obj, protocol=proto)
+
+                self.assertTrue(obj.getstate_called)
+                self.assertEqual(obj, pickle.loads(dumped))
+
+        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(proto=proto):
+                obj = FrozenSlotsSetStateClass('a', 1)
+                obj2 = pickle.loads(pickle.dumps(obj, protocol=proto))
+
+                self.assertTrue(obj2.setstate_called)
+                self.assertEqual(obj, obj2)
+
+        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(proto=proto):
+                obj = FrozenSlotsAllStateClass('a', 1)
+                dumped = pickle.dumps(obj, protocol=proto)
+
+                self.assertTrue(obj.getstate_called)
+
+                obj2 = pickle.loads(dumped)
+                self.assertTrue(obj2.setstate_called)
+                self.assertEqual(obj, obj2)
+
+    def test_slots_with_default_no_init(self):
+        @dataclass
+        class A(object):
+            __slots__ = ('a', 'b')
+            a = field(str)
+            b = field(str, default='b', init=False)
+
+        obj = A("a")
+        self.assertEqual(obj.a, 'a')
+        self.assertEqual(obj.b, 'b')
+
+    def test_slots_with_default_factory_no_init(self):
+        @dataclass
+        class A(object):
+            __slots__ = ('a', 'b')
+            a = field(str)
+            b = field(str, default_factory=lambda:'b', init=False)
+
+        obj = A("a")
+        self.assertEqual(obj.a, 'a')
+        self.assertEqual(obj.b, 'b')
+
+    def test_slots_no_weakref(self):
+        @dataclass
+        class A(object):
+            __slots__ = ()
+            pass
+
+        self.assertNotIn("__weakref__", A.__slots__)
+        a = A()
+        with self.assertRaisesRegexp(TypeError,
+                                    "cannot create weak reference"):
+            weakref.ref(a)
+        with self.assertRaises(AttributeError):
+            a.__weakref__
+
+
+    def test_slots_weakref_base_str(self):
+        class Base(object):
+            __slots__ = '__weakref__'
+
+        @dataclass
+        class A(Base):
+            a = field(int)
+
+        # __weakref__ is in the base class, not A.  But an A is still weakref-able.
+        self.assertIn("__weakref__", Base.__slots__)
+        self.assertNotIn("__weakref__", A.__slots__)
+        a = A(1)
+        weakref.ref(a)
+
+    def test_slots_weakref_base_tuple(self):
+        # Same as test_slots_weakref_base, but use a tuple instead of a string
+        # in the base class.
+        class Base(object):
+            __slots__ = ('__weakref__',)
+
+        @dataclass
+        class A(Base):
+            a = field(int)
+
+        # __weakref__ is in the base class, not A.  But an A is still
+        # weakref-able.
+        self.assertIn("__weakref__", Base.__slots__)
+        self.assertNotIn("__weakref__", A.__slots__)
+        a = A(1)
+        weakref.ref(a)
+
+
+    def test_dataclass_slot_dict(self):
+        class WithDictSlot(object):
+            __slots__ = ('__dict__',)
+
+        @dataclass
+        class A(WithDictSlot):
+            pass
+
+        self.assertEqual(A().__dict__, {})
+        A()
+
+
+
+
+class TestStringAnnotations(unittest.TestCase):
+    def test_classvar(self):
+        # Some expressions recognized as ClassVar really aren't.  But
+        #  if you're using string annotations, it's not an exact
+        #  science.
+        # These tests assume that both "import typing" and "from
+        # typing import *" have been run in this file.
+        for typestr in ('ClassVar[int]',
+                        'ClassVar [int]',
+                        ' ClassVar [int]',
+                        'ClassVar',
+                        ' ClassVar ',
+                        'typing.ClassVar[int]',
+                        'typing.ClassVar[str]',
+                        ' typing.ClassVar[str]',
+                        'typing .ClassVar[str]',
+                        'typing. ClassVar[str]',
+                        'typing.ClassVar [str]',
+                        'typing.ClassVar [ str]',
+
+                        # Not syntactically valid, but these will
+                        #  be treated as ClassVars.
+                        'typing.ClassVar.[int]',
+                        'typing.ClassVar+',
+                        ):
+            with self.subTest(typestr=typestr):
+                @dataclass
+                class C(object):
+                    pass
+                C.__annotations__ = {'x': typestr}
+
+                # x is a ClassVar, so C() takes no args.
+                C()
+
+                # And it won't appear in the class's dict because it doesn't
+                # have a default.
+                self.assertNotIn('x', C.__dict__)
+
+    def test_isnt_classvar(self):
+        for typestr in ('CV',
+                        't.ClassVar',
+                        't.ClassVar[int]',
+                        'typing..ClassVar[int]',
+                        'Classvar',
+                        'Classvar[int]',
+                        'typing.ClassVarx[int]',
+                        'typong.ClassVar[int]',
+                        'dataclasses.ClassVar[int]',
+                        'typingxClassVar[str]',
+                        ):
+            with self.subTest(typestr=typestr):
+                @dataclass
+                class C(object):
+                    pass
+                C.__annotations__ = {'x': typestr}
+
+                # x is not a ClassVar, so C() takes one arg.
+                self.assertEqual(C(10).x, 10)
+
+    def test_initvar(self):
+        # These tests assume that both "import dataclasses" and "from
+        #  dataclasses import *" have been run in this file.
+        for typestr in ('InitVar[int]',
+                        'InitVar [int]'
+                        ' InitVar [int]',
+                        'InitVar',
+                        ' InitVar ',
+                        'dataclasses.InitVar[int]',
+                        'dataclasses.InitVar[str]',
+                        ' dataclasses.InitVar[str]',
+                        'dataclasses .InitVar[str]',
+                        'dataclasses. InitVar[str]',
+                        'dataclasses.InitVar [str]',
+                        'dataclasses.InitVar [ str]',
+
+                        # Not syntactically valid, but these will
+                        #  be treated as InitVars.
+                        'dataclasses.InitVar.[int]',
+                        'dataclasses.InitVar+',
+                        ):
+            with self.subTest(typestr=typestr):
+                @dataclass
+                class C(object):
+                    pass
+                C.__annotations__ = {'x': typestr}
+
+                # x is an InitVar, so doesn't create a member.
+                with self.assertRaisesRegexp(AttributeError,
+                                            "object has no attribute 'x'"):
+                    C(1).x
+
+    def test_isnt_initvar(self):
+        for typestr in ('IV',
+                        'dc.InitVar',
+                        'xdataclasses.xInitVar',
+                        'typing.xInitVar[int]',
+                        ):
+            with self.subTest(typestr=typestr):
+                @dataclass
+                class C(object):
+                    pass
+                C.__annotations__ = {'x': typestr}
+
+                # x is not an InitVar, so there will be a member x.
+                self.assertEqual(C(10).x, 10)
+
+    def test_classvar_module_level_import(self):
+        from dataclass_module_1 import CV as CV_1, IV as IV_1, USING_STRINGS as USING_STRINGS_1
+        from dataclass_module_1_str import CV as CV_1_str, IV as IV_1_str, USING_STRINGS as USING_STRINGS_1_str
+        from dataclass_module_2 import CV as CV_2, IV as IV_2, USING_STRINGS as USING_STRINGS_2
+        from dataclass_module_2_str import CV as CV_2_str, IV as IV_2_str, USING_STRINGS as USING_STRINGS_2_str
+
+        modules_and_flags = [
+            (CV_1, IV_1, USING_STRINGS_1),
+            (CV_1_str, IV_1_str, USING_STRINGS_1_str),
+            (CV_2, IV_2, USING_STRINGS_2),
+            (CV_2_str, IV_2_str, USING_STRINGS_2_str),
+        ]
+
+        for cv_class, iv_class, using_strings in modules_and_flags:
+            with self.subTest(cv_class=cv_class):
+                # There's a difference in how the ClassVars are
+                # interpreted when using string annotations or
+                # not. See the imported modules for details.
+                if using_strings:
+                    c = cv_class(10)
+                else:
+                    c = cv_class()
+                self.assertEqual(c.cv0, 20)
+
+            with self.subTest(iv_class=iv_class):
+                # There's a difference in how the InitVars are
+                # interpreted when using string annotations or
+                # not. See the imported modules for details.
+                c = iv_class(0, 1, 2, 3, 4)
+
+                for field_name in ('iv0', 'iv1', 'iv2', 'iv3'):
+                    with self.subTest(field_name=field_name):
+                        with self.assertRaisesRegexp(AttributeError, "object has no attribute"):
+                            # Since field_name is an InitVar, it's
+                            # not an instance field.
+                            getattr(c, field_name)
+
+                if using_strings:
+                    # iv4 is interpreted as a normal field.
+                    self.assertIn('not_iv4', c.__dict__)
+                    self.assertEqual(c.not_iv4, 4)
+                else:
+                    # iv4 is interpreted as an InitVar, so it
+                    # won't exist on the instance.
+                    self.assertNotIn('not_iv4', c.__dict__)
+
+    def test_text_annotations(self):
+        from dataclass_textanno import Bar, Foo
+
+        # Skip this test as it requires get_type_hints functionality
+        # that may not be fully compatible in Python 2.7
+        pass
+
+
 if __name__ == '__main__':
     unittest.main()
 
