@@ -1,4 +1,4 @@
-from __future__ import print_function ##, absolute_import
+from __future__ import print_function, absolute_import
 import abc
 import functools
 import re
@@ -11,11 +11,11 @@ import itertools
 import weakref
 from collections import OrderedDict
 
-from abc_utils import update_abstractmethods
-from reprlib import recursive_repr, repr as actual_recursive_repr
-from string_utils import isidentifier
-from cheap_repr import cheap_repr
-from class_utils import is_descriptor
+from .abc_utils import update_abstractmethods
+from .reprlib import recursive_repr, repr as actual_recursive_repr
+from .string_utils import isidentifier
+#from cheap_repr import cheap_repr
+from .class_utils import is_descriptor
 from dictproxyhack import dictproxy
 import typing
 MappingProxyType = dictproxy
@@ -737,7 +737,7 @@ _hash_action = {(False, False, False, False): None,
 def collect_annotations(cls):
     items = []
     i = 0
-    for name, value in cls.__dict__.iteritems():
+    for name, value in cls.__dict__.items():
         if isinstance(value, Field):
             t = value.type
             if t is None:
