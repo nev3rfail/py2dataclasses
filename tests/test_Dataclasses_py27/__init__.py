@@ -2126,6 +2126,15 @@ class TestCase(unittest.TestCase):
 
 
 class TestFieldNoAnnotation(unittest.TestCase):
+
+    def test_field_without_annotation(self):
+        with self.assertRaisesRegexp(TypeError,
+                                     "'f' is a field but has no type annotation"):
+            @dataclass
+            class TEST_NO_ANNOTATION(object):
+                f = field()
+
+            pass
     def test_field_without_annotation(self):
         with self.assertRaisesRegexp(TypeError,
                                      "'f' is a field but has no type annotation"):
@@ -2248,6 +2257,55 @@ class TestMakeDataclass(unittest.TestCase):
         self.assertEqual(c.x, 5)
         self.assertEqual(C.y, 10)
 
+    def test_keyword_field_names(self):
+        for field_name in ['for', 'while', 'if', 'else']:
+            with self.subTest(field=field_name):
+                with self.assertRaisesRegexp(TypeError, 'must not be keywords'):
+                    make_dataclass('C', ['a', field_name])
+
+    def test_non_identifier_field_names(self):
+        for field_name in ['()', 'x,y', '*']:
+            with self.subTest(field=field_name):
+                with self.assertRaisesRegexp(TypeError, 'must be valid identifiers'):
+                    make_dataclass('C', ['a', field_name])
+
+    def test_underscore_field_names(self):
+        # Unlike namedtuple, it's okay if dataclass field names have an underscore.
+        make_dataclass('C', ['_', '_a', 'a_a', 'a_'])
+
+    def test_no_types_get_annotations(self):
+        C = make_dataclass('C', ['x', ('y', int), 'z'])
+        # Just make sure it doesn't crash
+        _ = C(1, 2, 'three')
+
+    def test_invalid_type_specification(self):
+        for bad_field in [(), (1, 2, 3, 4)]:
+            with self.subTest(bad_field=bad_field):
+                with self.assertRaisesRegexp(TypeError, 'Invalid field:'):
+                    make_dataclass('C', ['a', bad_field])
+
+    def test_duplicate_field_names(self):
+        for field in ['a', 'ab']:
+            with self.subTest(field=field):
+                with self.assertRaisesRegexp(TypeError, 'Field name duplicated'):
+                    make_dataclass('C', [field, 'a', field])
+
+    def test_dataclass_decorator_default(self):
+        C = make_dataclass('C', [('x', int)], decorator=dataclass)
+        c = C(10)
+        self.assertEqual(c.x, 10)
+
+    def test_funny_class_names(self):
+        # No reason to prevent weird class names
+        for classname in ['()', 'x,y', '*']:
+            with self.subTest(classname=classname):
+                C = make_dataclass(classname, ['a', 'b'])
+                self.assertEqual(C.__name__, classname)
+
+    def test_module_attr(self):
+        # Test that module is set correctly
+        C = make_dataclass('C', [('x', int)])
+        self.assertEqual(C.__module__, __name__)
 
 class TestReplace(unittest.TestCase):
     def test(self):
@@ -2573,7 +2631,14 @@ class TestInit(unittest.TestCase):
             def __init__(self, x):
                 self.x = 2 * x
         self.assertEqual(C(5).x, 10)
+    def test_inherit_from_protocol(self):
+        # Dataclasses inheriting from protocol should preserve their own __init__.
+        # Protocol is tricky in Python 2, so we'll just test basic inheritance
+        @dataclass
+        class C(object):
+            a = field(int)
 
+        self.assertEqual(C(5).a, 5)
 
 class TestRepr(unittest.TestCase):
     def test_repr(self):
@@ -2845,249 +2910,62 @@ class TestHash(unittest.TestCase):
                 test(case, unsafe_hash, eq, frozen, with_hash, expected)
 
 
-class TestFrozen(unittest.TestCase):
-    def test_frozen(self):
+    def test_hash_no_args(self):
+        # Test dataclasses with no hash= argument.
+        class Base(object):
+            def __hash__(self):
+                return 301
+
+        # frozen=True should auto-generate __hash__
         @dataclass(frozen=True)
-        class C(object):
+        class C(Base):
             i = field(int)
 
-        c = C(10)
-        self.assertEqual(c.i, 10)
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-        self.assertEqual(c.i, 10)
+        self.assertEqual(hash(C(10)), hash((10,)))
 
-    def test_frozen_hash(self):
+    def test_0_field_hash(self):
         @dataclass(frozen=True)
         class C(object):
-            x = field(object)
+            pass
+        self.assertEqual(hash(C()), hash(()))
 
-        # If x is immutable, we can compute the hash.
-        hash(C(3))
-
-        # If x is mutable, computing the hash is an error.
-        with self.assertRaisesRegexp(TypeError, 'unhashable type'):
-            hash(C({}))
-
-    def test_frozen_no_init(self):
-        @dataclass(frozen=True, init=False)
+        @dataclass(unsafe_hash=True)
         class C(object):
-            i = field(int, default=0)
+            pass
+        self.assertEqual(hash(C()), hash(()))
 
-        c = C()
-        self.assertEqual(c.i, 0)
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-
-    def test_frozen_fields_with_defaults(self):
+    def test_1_field_hash(self):
         @dataclass(frozen=True)
         class C(object):
             x = field(int)
-            y = field(int, default=5)
-            z = field(int, default_factory=list)
+        self.assertEqual(hash(C(4)), hash((4,)))
+        self.assertEqual(hash(C(42)), hash((42,)))
 
-        c = C(3)
-        self.assertEqual((c.x, c.y, c.z), (3, 5, []))
-        with self.assertRaises(FrozenInstanceError):
-            c.x = 10
-
-    def test_frozen_field_no_default(self):
-        @dataclass(frozen=True)
+        @dataclass(unsafe_hash=True)
         class C(object):
             x = field(int)
+        self.assertEqual(hash(C(4)), hash((4,)))
+        self.assertEqual(hash(C(42)), hash((42,)))
 
-        c = C(10)
-        self.assertEqual(c.x, 10)
-        with self.assertRaisesRegexp(FrozenInstanceError, "cannot assign to field 'x'"):
-            c.x = 5
-        self.assertEqual(c.x, 10)
-
-    def test_frozen_empty(self):
-        @dataclass(frozen=True)
-        class C(object):
-            pass
-
-        c = C()
-        self.assertFalse(hasattr(c, 'i'))
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-        self.assertFalse(hasattr(c, 'i'))
-        with self.assertRaises(FrozenInstanceError):
-            del c.i
-
-    def test_inherit(self):
-        @dataclass(frozen=True)
-        class C(object):
-            i = field(int)
-
-        @dataclass(frozen=True)
-        class D(C):
-            j = field(int)
-
-        d = D(0, 10)
-        with self.assertRaises(FrozenInstanceError):
-            d.i = 5
-        with self.assertRaises(FrozenInstanceError):
-            d.j = 6
-        self.assertEqual(d.i, 0)
-        self.assertEqual(d.j, 10)
-
-    def test_inherit_nonfrozen_from_empty_frozen(self):
-        @dataclass(frozen=True)
-        class C(object):
-            pass
-
-        with self.assertRaisesRegexp(TypeError,
-                                     'cannot inherit non-frozen dataclass from a frozen one'):
-            @dataclass
-            class D(C):
-                j = field(int)
-
-    def test_inherit_nonfrozen_from_empty(self):
-        @dataclass
-        class C(object):
-            pass
-
-        @dataclass
-        class D(C):
-            j = field(int)
-
-        d = D(3)
-        self.assertEqual(d.j, 3)
-        self.assertIsInstance(d, C)
-
-    def test_inherit_nonfrozen_from_frozen(self):
-        @dataclass(frozen=True)
-        class C(object):
-            i = field(int)
-
-        with self.assertRaisesRegexp(TypeError,
-                                     'cannot inherit non-frozen dataclass from a frozen one'):
-            @dataclass
-            class D(C):
-                pass
-
-    def test_inherit_frozen_from_nonfrozen(self):
+    def test_eq_only(self):
         @dataclass
         class C(object):
             i = field(int)
+            def __eq__(self, other):
+                return self.i == other.i
+        self.assertEqual(C(1), C(1))
+        self.assertNotEqual(C(1), C(4))
 
-        with self.assertRaisesRegexp(TypeError,
-                                     'cannot inherit frozen dataclass from a non-frozen one'):
-            @dataclass(frozen=True)
-            class D(C):
-                pass
-
-    def test_inherit_from_normal_class(self):
+        @dataclass(unsafe_hash=True)
         class C(object):
-            pass
-
-        @dataclass(frozen=True)
-        class D(C):
             i = field(int)
-
-        d = D(10)
-        with self.assertRaises(FrozenInstanceError):
-            d.i = 5
-
-    def test_non_frozen_normal_derived(self):
-        @dataclass(frozen=True)
-        class D(object):
-            x = field(int)
-            y = field(int, default=10)
-
-        class S(D):
-            pass
-
-        s = S(3)
-        self.assertEqual(s.x, 3)
-        self.assertEqual(s.y, 10)
-        s.cached = True
-
-        # But can't change the frozen attributes.
-        with self.assertRaises(FrozenInstanceError):
-            s.x = 5
-        with self.assertRaises(FrozenInstanceError):
-            s.y = 5
-        self.assertEqual(s.x, 3)
-        self.assertEqual(s.y, 10)
-        self.assertEqual(s.cached, True)
-
-        with self.assertRaises(FrozenInstanceError):
-            del s.x
-        self.assertEqual(s.x, 3)
-        with self.assertRaises(FrozenInstanceError):
-            del s.y
-        self.assertEqual(s.y, 10)
-        del s.cached
-        self.assertFalse(hasattr(s, 'cached'))
-        with self.assertRaises(AttributeError) as cm:
-            del s.cached
-        self.assertNotIsInstance(cm.exception, FrozenInstanceError)
-
-    def test_non_frozen_normal_derived_from_empty_frozen(self):
-        @dataclass(frozen=True)
-        class D(object):
-            pass
-
-        class S(D):
-            pass
-
-        s = S()
-        self.assertFalse(hasattr(s, 'x'))
-        s.x = 5
-        self.assertEqual(s.x, 5)
-
-        del s.x
-        self.assertFalse(hasattr(s, 'x'))
-        with self.assertRaises(AttributeError) as cm:
-            del s.x
-        self.assertNotIsInstance(cm.exception, FrozenInstanceError)
-
-    def test_overwriting_frozen(self):
-        # frozen uses __setattr__ and __delattr__.
-        with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __setattr__'):
-            @dataclass(frozen=True)
-            class C(object):
-                x = field(int)
-                def __setattr__(self):
-                    pass
-
-        with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __delattr__'):
-            @dataclass(frozen=True)
-            class C(object):
-                x = field(int)
-                def __delattr__(self):
-                    pass
-
-        @dataclass(frozen=False)
-        class C(object):
-            x = field(int)
-            def __setattr__(self, name, value):
-                self.__dict__['x'] = value * 2
-        self.assertEqual(C(10).x, 20)
+            def __eq__(self, other):
+                return self.i == other.i
+        self.assertEqual(C(1), C(1.0))
+        self.assertEqual(hash(C(1)), hash(C(1.0)))
 
 
-class TestFrozenAdditional(unittest.TestCase):
-    def test_frozen_default_value(self):
-        @dataclass(frozen=True)
-        class C(object):
-            i = field(int, default=0)
 
-        c = C()
-        self.assertEqual(c.i, 0)
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-
-    def test_frozen_deepcopy_without_slots(self):
-        @dataclass(frozen=True)
-        class C(object):
-            s = field(str)
-
-        c = C('hello')
-        self.assertEqual(copy.deepcopy(c), c)
 
 class TestAbstract(unittest.TestCase):
     def test_abc_implementation(self):
@@ -3274,15 +3152,6 @@ class TestKeywordArgs(unittest.TestCase):
         self.assertEqual(C(42, b=10).__match_args__, ('a',))
 
 
-class TestFieldNoAnnotation(unittest.TestCase):
-    def test_field_without_annotation(self):
-        with self.assertRaisesRegexp(TypeError,
-                                     "'f' is a field but has no type annotation"):
-            @dataclass
-            class TEST_NO_ANNOTATION(object):
-                f = field()
-
-            pass
 
 
 class TestDescriptors(unittest.TestCase):
@@ -3471,61 +3340,57 @@ class TestDescriptors(unittest.TestCase):
         with self.assertRaisesRegexp(TypeError, '__init__\(\) takes exactly 2 arguments \(1 given\)'):
             c = C()
 
-# # This test uses frozen=True with slots=True which may not be supported
-# # Create some test classes for pickling
-# @dataclass(frozen=True, slots=True)
-# class FrozenSlotsClass(object):
-#     #__slots__ = ('foo', 'bar')
-#     foo = field(str)
-#     bar = field(int)
-#
-# @dataclass(frozen=True)
-# class FrozenWithoutSlotsClass(object):
-#     foo = field(str)
-#     bar = field(int)
-#
-# # This test uses __getstate__ and __setstate__ with frozen slots
-# @dataclass(frozen=True, slots=True)
-# class FrozenSlotsGetStateClass(object):
-#     ##__slots__ = ('foo', 'bar', 'getstate_called')
-#     foo = field(str)
-#     bar = field(int)
-#     getstate_called = field(bool, default=False, compare=False)
-#
-#     def __getstate__(self):
-#         object.__setattr__(self, 'getstate_called', True)
-#         return [self.foo, self.bar]
-#
-# @dataclass(frozen=True, slots=True)
-# class FrozenSlotsSetStateClass(object):
-#     #__slots__ = ('foo', 'bar', 'setstate_called')
-#     foo = field(str)
-#     bar = field(int)
-#     setstate_called = field(bool, default=False, compare=False)
-#
-#     def __setstate__(self, state):
-#         object.__setattr__(self, 'setstate_called', True)
-#         object.__setattr__(self, 'foo', state[0])
-#         object.__setattr__(self, 'bar', state[1])
-#
-# @dataclass(frozen=True, slots=True)
-# class FrozenSlotsAllStateClass(object):
-#     #__slots__ = ('foo', 'bar', 'getstate_called', 'setstate_called')
-#     foo = field(str)
-#     bar = field(int)
-#     getstate_called = field(bool, default=False, compare=False)
-#     setstate_called = field(bool, default=False, compare=False)
-#
-#     def __getstate__(self):
-#         object.__setattr__(self, 'getstate_called', True)
-#         return [self.foo, self.bar]
-#
-#     def __setstate__(self, state):
-#         object.__setattr__(self, 'setstate_called', True)
-#         object.__setattr__(self, 'foo', state[0])
-#         object.__setattr__(self, 'bar', state[1])
+from contextlib import contextmanager
+import sys
+
+@contextmanager
+def expose_to_test(*classes):
+    saved = []
+    try:
+        for cls in classes:
+            mod = sys.modules[cls.__module__]
+            saved.append((mod, cls.__name__, getattr(mod, cls.__name__, None)))
+            setattr(mod, cls.__name__, cls)
+        yield
+    finally:
+        for mod, name, orig in saved:
+            if orig is None:
+                delattr(mod, name)
+            else:
+                setattr(mod, name, orig)
+
+
+
+
+
+
 
 class TestSlots(unittest.TestCase):
+
+
+    def test_frozen_pickle(self):
+
+        @dataclass(frozen=True)
+        class FrozenWithoutSlotsClass(object):
+            foo = field(str)
+            bar = field(int)
+
+        @dataclass(frozen=True, slots=True)
+        class FrozenSlotsClass(object):
+            foo = field(str)
+            bar = field(int)
+        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(proto=proto):
+                with expose_to_test(FrozenWithoutSlotsClass, FrozenSlotsClass):
+                    obj = FrozenSlotsClass("a", 1)
+                    p = pickle.loads(pickle.dumps(obj, protocol=proto))
+                    self.assertIsNot(obj, p)
+                    self.assertEqual(obj, p)
+
+                    obj = FrozenWithoutSlotsClass("a", 1)
+                    p = pickle.loads(pickle.dumps(obj, protocol=proto))
+                    self.assertIsNot(obj, p)
+                    self.assertEqual(obj, p)
     def test_simple(self):
         @dataclass(slots=True)
         class C(object):
@@ -3566,51 +3431,81 @@ class TestSlots(unittest.TestCase):
         # We can add a new field to the derived instance.
         d.z = 10
 
-
-    def test_frozen_pickle(self):
-
-
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                obj = FrozenSlotsClass("a", 1)
-                p = pickle.loads(pickle.dumps(obj, protocol=proto))
-                self.assertIsNot(obj, p)
-                self.assertEqual(obj, p)
-
-                obj = FrozenWithoutSlotsClass("a", 1)
-                p = pickle.loads(pickle.dumps(obj, protocol=proto))
-                self.assertIsNot(obj, p)
-                self.assertEqual(obj, p)
-
     def test_frozen_slots_pickle_custom_state(self):
 
+        # This test uses __getstate__ and __setstate__ with frozen slots
+        @dataclass(frozen=True, slots=True)
+        class FrozenSlotsGetStateClass(object):
+            ##__slots__ = ('foo', 'bar', 'getstate_called')
+            foo = field(str)
+            bar = field(int)
+            getstate_called = field(bool, default=False, compare=False)
 
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                obj = FrozenSlotsGetStateClass('a', 1)
-                dumped = pickle.dumps(obj, protocol=proto)
+            def __getstate__(self):
+                object.__setattr__(self, 'getstate_called', True)
+                return [self.foo, self.bar]
 
-                self.assertTrue(obj.getstate_called)
-                self.assertEqual(obj, pickle.loads(dumped))
 
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                obj = FrozenSlotsSetStateClass('a', 1)
-                obj2 = pickle.loads(pickle.dumps(obj, protocol=proto))
+        @dataclass(frozen=True, slots=True)
+        class FrozenSlotsSetStateClass(object):
+            #__slots__ = ('foo', 'bar', 'setstate_called')
+            foo = field(str)
+            bar = field(int)
+            setstate_called = field(bool, default=False, compare=False)
 
-                self.assertTrue(obj2.setstate_called)
-                self.assertEqual(obj, obj2)
+            def __setstate__(self, state):
+                object.__setattr__(self, 'setstate_called', True)
+                object.__setattr__(self, 'foo', state[0])
+                object.__setattr__(self, 'bar', state[1])
 
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                obj = FrozenSlotsAllStateClass('a', 1)
-                dumped = pickle.dumps(obj, protocol=proto)
+        @dataclass(frozen=True, slots=True)
+        class FrozenSlotsAllStateClass(object):
+            #__slots__ = ('foo', 'bar', 'getstate_called', 'setstate_called')
+            foo = field(str)
+            bar = field(int)
+            getstate_called = field(bool, default=False, compare=False)
+            setstate_called = field(bool, default=False, compare=False)
 
-                self.assertTrue(obj.getstate_called)
+            def __getstate__(self):
+                object.__setattr__(self, 'getstate_called', True)
+                return [self.foo, self.bar]
 
-                obj2 = pickle.loads(dumped)
-                self.assertTrue(obj2.setstate_called)
-                self.assertEqual(obj, obj2)
+            def __setstate__(self, state):
+                object.__setattr__(self, 'setstate_called', True)
+                object.__setattr__(self, 'foo', state[0])
+                object.__setattr__(self, 'bar', state[1])
+
+
+
+        with expose_to_test(FrozenSlotsAllStateClass, FrozenSlotsGetStateClass, FrozenSlotsSetStateClass):
+
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+
+                    obj = FrozenSlotsGetStateClass('a', 1)
+                    dumped = pickle.dumps(obj, protocol=proto)
+
+                    self.assertTrue(obj.getstate_called)
+                    self.assertEqual(obj, pickle.loads(dumped))
+
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    obj = FrozenSlotsSetStateClass('a', 1)
+                    obj2 = pickle.loads(pickle.dumps(obj, protocol=proto))
+
+                    self.assertTrue(obj2.setstate_called)
+                    self.assertEqual(obj, obj2)
+
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    obj = FrozenSlotsAllStateClass('a', 1)
+                    dumped = pickle.dumps(obj, protocol=proto)
+
+                    self.assertTrue(obj.getstate_called)
+
+                    obj2 = pickle.loads(dumped)
+                    self.assertTrue(obj2.setstate_called)
+                    self.assertEqual(obj, obj2)
 
     def test_slots_with_default_no_init(self):
         @dataclass(slots=True)
@@ -3691,6 +3586,39 @@ class TestSlots(unittest.TestCase):
 
         self.assertEqual(A().__dict__, {})
         A()
+
+    def test_generated_slots(self):
+        @dataclass(slots=True)
+        class C(object):
+            x = field(int)
+            y = field(int)
+
+        c = C(1, 2)
+        self.assertEqual((c.x, c.y), (1, 2))
+
+        c.x = 3
+        c.y = 4
+        self.assertEqual((c.x, c.y), (3, 4))
+
+        with self.assertRaisesRegexp(AttributeError, "object has no attribute 'z'"):
+            c.z = 5
+
+    def test_add_slots_when_slots_exists(self):
+        with self.assertRaisesRegexp(TypeError, 'already specifies __slots__'):
+            @dataclass(slots=True)
+            class C(object):
+                __slots__ = ('x',)
+                x = field(int)
+
+    def test_returns_new_class(self):
+        class A(object):
+            x = field(int)
+
+        B = dataclass(A, slots=True)
+        self.assertIsNot(A, B)
+
+        self.assertFalse(hasattr(A, "__slots__"))
+        self.assertTrue(hasattr(B, "__slots__"))
 
 
 from dataclasses import *
@@ -3992,11 +3920,12 @@ class TestPicakle(unittest.TestCase):
             y = field(str)
 
         c = C(1, 'hello')
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                p = pickle.loads(pickle.dumps(c, proto))
-                self.assertEqual(p.x, 1)
-                self.assertEqual(p.y, 'hello')
+        with expose_to_test(C):
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    p = pickle.loads(pickle.dumps(c, proto))
+                    self.assertEqual(p.x, 1)
+                    self.assertEqual(p.y, 'hello')
 
     def test_pickle_with_default(self):
         @dataclass
@@ -4005,14 +3934,15 @@ class TestPicakle(unittest.TestCase):
             y = field(int, default=10)
 
         c = C(5)
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                p = pickle.loads(pickle.dumps(c, proto))
-                self.assertEqual(p.x, 5)
-                self.assertEqual(p.y, 10)
+        with expose_to_test(C):
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    p = pickle.loads(pickle.dumps(c, proto))
+                    self.assertEqual(p.x, 5)
+                    self.assertEqual(p.y, 10)
 
 class TestFrozen(unittest.TestCase):
-    def test_inherit_frozen_multiple_inheritance(self):
+    def test_inherit_frozen_mutliple_inheritance(self):
         @dataclass
         class NotFrozen(object):
             pass
@@ -4092,160 +4022,249 @@ class TestFrozen(unittest.TestCase):
         @dataclass(frozen=True)
         class C4(FrozenB, FrozenA):
             pass
-
-
-class TestHash(unittest.TestCase):
-    def test_hash_no_args(self):
-        # Test dataclasses with no hash= argument.
-        class Base(object):
-            def __hash__(self):
-                return 301
-
-        # frozen=True should auto-generate __hash__
+    def test_frozen_default_value(self):
         @dataclass(frozen=True)
-        class C(Base):
+        class C(object):
+            i = field(int, default=0)
+
+        c = C()
+        self.assertEqual(c.i, 0)
+        with self.assertRaises(FrozenInstanceError):
+            c.i = 5
+
+    def test_frozen_deepcopy_without_slots(self):
+        @dataclass(frozen=True)
+        class C(object):
+            s = field(str)
+
+        c = C('hello')
+        self.assertEqual(copy.deepcopy(c), c)
+
+    def test_frozen(self):
+        @dataclass(frozen=True)
+        class C(object):
             i = field(int)
 
-        self.assertEqual(hash(C(10)), hash((10,)))
+        c = C(10)
+        self.assertEqual(c.i, 10)
+        with self.assertRaises(FrozenInstanceError):
+            c.i = 5
+        self.assertEqual(c.i, 10)
 
-    def test_0_field_hash(self):
+    def test_frozen_hash(self):
         @dataclass(frozen=True)
         class C(object):
-            pass
-        self.assertEqual(hash(C()), hash(()))
+            x = field(object)
 
-        @dataclass(unsafe_hash=True)
+        # If x is immutable, we can compute the hash.
+        hash(C(3))
+
+        # If x is mutable, computing the hash is an error.
+        with self.assertRaisesRegexp(TypeError, 'unhashable type'):
+            hash(C({}))
+
+    def test_frozen_no_init(self):
+        @dataclass(frozen=True, init=False)
         class C(object):
-            pass
-        self.assertEqual(hash(C()), hash(()))
+            i = field(int, default=0)
 
-    def test_1_field_hash(self):
+        c = C()
+        self.assertEqual(c.i, 0)
+        with self.assertRaises(FrozenInstanceError):
+            c.i = 5
+
+    def test_frozen_fields_with_defaults(self):
         @dataclass(frozen=True)
         class C(object):
             x = field(int)
-        self.assertEqual(hash(C(4)), hash((4,)))
-        self.assertEqual(hash(C(42)), hash((42,)))
+            y = field(int, default=5)
+            z = field(int, default_factory=list)
 
-        @dataclass(unsafe_hash=True)
+        c = C(3)
+        self.assertEqual((c.x, c.y, c.z), (3, 5, []))
+        with self.assertRaises(FrozenInstanceError):
+            c.x = 10
+
+    def test_frozen_field_no_default(self):
+        @dataclass(frozen=True)
         class C(object):
             x = field(int)
-        self.assertEqual(hash(C(4)), hash((4,)))
-        self.assertEqual(hash(C(42)), hash((42,)))
 
-    def test_eq_only(self):
-        @dataclass
-        class C(object):
-            i = field(int)
-            def __eq__(self, other):
-                return self.i == other.i
-        self.assertEqual(C(1), C(1))
-        self.assertNotEqual(C(1), C(4))
-
-        @dataclass(unsafe_hash=True)
-        class C(object):
-            i = field(int)
-            def __eq__(self, other):
-                return self.i == other.i
-        self.assertEqual(C(1), C(1.0))
-        self.assertEqual(hash(C(1)), hash(C(1.0)))
-
-
-class TestInit(unittest.TestCase):
-    def test_inherit_from_protocol(self):
-        # Dataclasses inheriting from protocol should preserve their own __init__.
-        # Protocol is tricky in Python 2, so we'll just test basic inheritance
-        @dataclass
-        class C(object):
-            a = field(int)
-
-        self.assertEqual(C(5).a, 5)
-
-
-class TestMakeDataclassExtra(unittest.TestCase):
-    def test_keyword_field_names(self):
-        for field_name in ['for', 'while', 'if', 'else']:
-            with self.subTest(field=field_name):
-                with self.assertRaisesRegexp(TypeError, 'must not be keywords'):
-                    make_dataclass('C', ['a', field_name])
-
-    def test_non_identifier_field_names(self):
-        for field_name in ['()', 'x,y', '*']:
-            with self.subTest(field=field_name):
-                with self.assertRaisesRegexp(TypeError, 'must be valid identifiers'):
-                    make_dataclass('C', ['a', field_name])
-
-    def test_underscore_field_names(self):
-        # Unlike namedtuple, it's okay if dataclass field names have an underscore.
-        make_dataclass('C', ['_', '_a', 'a_a', 'a_'])
-
-    def test_no_types_get_annotations(self):
-        C = make_dataclass('C', ['x', ('y', int), 'z'])
-        # Just make sure it doesn't crash
-        _ = C(1, 2, 'three')
-
-    def test_invalid_type_specification(self):
-        for bad_field in [(), (1, 2, 3, 4)]:
-            with self.subTest(bad_field=bad_field):
-                with self.assertRaisesRegexp(TypeError, 'Invalid field:'):
-                    make_dataclass('C', ['a', bad_field])
-
-    def test_duplicate_field_names(self):
-        for field in ['a', 'ab']:
-            with self.subTest(field=field):
-                with self.assertRaisesRegexp(TypeError, 'Field name duplicated'):
-                    make_dataclass('C', [field, 'a', field])
-
-    def test_dataclass_decorator_default(self):
-        C = make_dataclass('C', [('x', int)], decorator=dataclass)
         c = C(10)
         self.assertEqual(c.x, 10)
+        with self.assertRaisesRegexp(FrozenInstanceError, "cannot assign to field 'x'"):
+            c.x = 5
+        self.assertEqual(c.x, 10)
 
-    def test_funny_class_names(self):
-        # No reason to prevent weird class names
-        for classname in ['()', 'x,y', '*']:
-            with self.subTest(classname=classname):
-                C = make_dataclass(classname, ['a', 'b'])
-                self.assertEqual(C.__name__, classname)
+    def test_frozen_empty(self):
+        @dataclass(frozen=True)
+        class C(object):
+            pass
 
-    def test_module_attr(self):
-        # Test that module is set correctly
-        C = make_dataclass('C', [('x', int)])
-        self.assertEqual(C.__module__, __name__)
+        c = C()
+        self.assertFalse(hasattr(c, 'i'))
+        with self.assertRaises(FrozenInstanceError):
+            c.i = 5
+        self.assertFalse(hasattr(c, 'i'))
+        with self.assertRaises(FrozenInstanceError):
+            del c.i
 
+    def test_inherit(self):
+        @dataclass(frozen=True)
+        class C(object):
+            i = field(int)
 
-class TestSlots(unittest.TestCase):
-    def test_generated_slots(self):
-        @dataclass(slots=True)
+        @dataclass(frozen=True)
+        class D(C):
+            j = field(int)
+
+        d = D(0, 10)
+        with self.assertRaises(FrozenInstanceError):
+            d.i = 5
+        with self.assertRaises(FrozenInstanceError):
+            d.j = 6
+        self.assertEqual(d.i, 0)
+        self.assertEqual(d.j, 10)
+
+    def test_inherit_nonfrozen_from_empty_frozen(self):
+        @dataclass(frozen=True)
+        class C(object):
+            pass
+
+        with self.assertRaisesRegexp(TypeError,
+                                     'cannot inherit non-frozen dataclass from a frozen one'):
+            @dataclass
+            class D(C):
+                j = field(int)
+
+    def test_inherit_nonfrozen_from_empty(self):
+        @dataclass
+        class C(object):
+            pass
+
+        @dataclass
+        class D(C):
+            j = field(int)
+
+        d = D(3)
+        self.assertEqual(d.j, 3)
+        self.assertIsInstance(d, C)
+
+    def test_inherit_nonfrozen_from_frozen(self):
+        @dataclass(frozen=True)
+        class C(object):
+            i = field(int)
+
+        with self.assertRaisesRegexp(TypeError,
+                                     'cannot inherit non-frozen dataclass from a frozen one'):
+            @dataclass
+            class D(C):
+                pass
+
+    def test_inherit_frozen_from_nonfrozen(self):
+        @dataclass
+        class C(object):
+            i = field(int)
+
+        with self.assertRaisesRegexp(TypeError,
+                                     'cannot inherit frozen dataclass from a non-frozen one'):
+            @dataclass(frozen=True)
+            class D(C):
+                pass
+
+    def test_inherit_from_normal_class(self):
+        class C(object):
+            pass
+
+        @dataclass(frozen=True)
+        class D(C):
+            i = field(int)
+
+        d = D(10)
+        with self.assertRaises(FrozenInstanceError):
+            d.i = 5
+
+    def test_non_frozen_normal_derived(self):
+        @dataclass(frozen=True)
+        class D(object):
+            x = field(int)
+            y = field(int, default=10)
+
+        class S(D):
+            pass
+
+        s = S(3)
+        self.assertEqual(s.x, 3)
+        self.assertEqual(s.y, 10)
+        s.cached = True
+
+        # But can't change the frozen attributes.
+        with self.assertRaises(FrozenInstanceError):
+            s.x = 5
+        with self.assertRaises(FrozenInstanceError):
+            s.y = 5
+        self.assertEqual(s.x, 3)
+        self.assertEqual(s.y, 10)
+        self.assertEqual(s.cached, True)
+
+        with self.assertRaises(FrozenInstanceError):
+            del s.x
+        self.assertEqual(s.x, 3)
+        with self.assertRaises(FrozenInstanceError):
+            del s.y
+        self.assertEqual(s.y, 10)
+        del s.cached
+        self.assertFalse(hasattr(s, 'cached'))
+        with self.assertRaises(AttributeError) as cm:
+            del s.cached
+        self.assertNotIsInstance(cm.exception, FrozenInstanceError)
+
+    def test_non_frozen_normal_derived_from_empty_frozen(self):
+        @dataclass(frozen=True)
+        class D(object):
+            pass
+
+        class S(D):
+            pass
+
+        s = S()
+        self.assertFalse(hasattr(s, 'x'))
+        s.x = 5
+        self.assertEqual(s.x, 5)
+
+        del s.x
+        self.assertFalse(hasattr(s, 'x'))
+        with self.assertRaises(AttributeError) as cm:
+            del s.x
+        self.assertNotIsInstance(cm.exception, FrozenInstanceError)
+
+    def test_overwriting_frozen(self):
+        # frozen uses __setattr__ and __delattr__.
+        with self.assertRaisesRegexp(TypeError,
+                                     'Cannot overwrite attribute __setattr__'):
+            @dataclass(frozen=True)
+            class C(object):
+                x = field(int)
+                def __setattr__(self):
+                    pass
+
+        with self.assertRaisesRegexp(TypeError,
+                                     'Cannot overwrite attribute __delattr__'):
+            @dataclass(frozen=True)
+            class C(object):
+                x = field(int)
+                def __delattr__(self):
+                    pass
+
+        @dataclass(frozen=False)
         class C(object):
             x = field(int)
-            y = field(int)
+            def __setattr__(self, name, value):
+                self.__dict__['x'] = value * 2
+        self.assertEqual(C(10).x, 20)
 
-        c = C(1, 2)
-        self.assertEqual((c.x, c.y), (1, 2))
 
-        c.x = 3
-        c.y = 4
-        self.assertEqual((c.x, c.y), (3, 4))
 
-        with self.assertRaisesRegexp(AttributeError, "object has no attribute 'z'"):
-            c.z = 5
-
-    def test_add_slots_when_slots_exists(self):
-        with self.assertRaisesRegexp(TypeError, 'already specifies __slots__'):
-            @dataclass(slots=True)
-            class C(object):
-                __slots__ = ('x',)
-                x = field(int)
-
-    def test_returns_new_class(self):
-        class A(object):
-            x = field(int)
-
-        B = dataclass(A, slots=True)
-        self.assertIsNot(A, B)
-
-        self.assertFalse(hasattr(A, "__slots__"))
-        self.assertTrue(hasattr(B, "__slots__"))
 
 
 def run():
