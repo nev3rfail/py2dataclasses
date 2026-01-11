@@ -3840,12 +3840,14 @@ class TestSlots(unittest.TestCase):
         class C1(typing.Generic[T], RawBase):
             pass
         self.assertEqual(C1.__slots__, ())
+        self.assertTrue(C1.__weakref__)
         C1()
 
         @dataclass(slots=True, weakref_slot=True)
         class C2(RawBase, typing.Generic[T]):
             pass
         self.assertEqual(C2.__slots__, ())
+        self.assertTrue(C2.__weakref__)
         C2()
 
     def test_dataclass_derived_generic_from_slotted_base(self):
@@ -4084,7 +4086,6 @@ class TestSlots(unittest.TestCase):
     def test_dataclass_slot_dict_ctype(self):
 
         import _testcapi
-        import ctypes
         @dataclass(slots=True)
         class HasDictOffset(_testcapi.HeapCTypeWithDict):
             __dict__ = {}
@@ -4182,7 +4183,7 @@ class TestStringAnnotations(unittest.TestCase):
                         ' InitVar [int]',
                         'InitVar',
                         ' InitVar ',
-                        'dataclasses.InitVar[int]',
+                        'dataclasses.InitVar[int]', # 'dataclasses.InitVar[int]'
                         'dataclasses.InitVar[str]',
                         ' dataclasses.InitVar[str]',
                         'dataclasses .InitVar[str]',
@@ -4271,160 +4272,6 @@ class TestStringAnnotations(unittest.TestCase):
         # Skip this test as it requires get_type_hints functionality
         # that may not be fully compatible in Python 2.7
         pass
-
-
-class TestInitVar(unittest.TestCase):
-    def test_initvar_in_base(self):
-        
-        @dataclass
-        class Base(object):
-            x = field(InitVar(int))
-
-        @dataclass
-        class C(Base):
-            y = field(int)
-
-        c = C(1, 2)
-        self.assertFalse(hasattr(c, 'x'))
-        self.assertEqual(c.y, 2)
-
-    def test_initvar_in_derived(self):
-        
-        @dataclass
-        class Base(object):
-            x = field(int)
-
-        @dataclass
-        class C(Base):
-            y = field(InitVar(int))
-            z = field(int)
-
-        c = C(1, 2, 3)
-        self.assertEqual(c.x, 1)
-        self.assertFalse(hasattr(c, 'y'))
-        self.assertEqual(c.z, 3)
-
-class TestSpecialMethods(unittest.TestCase):
-    def test_repr_with_unicode(self):
-        @dataclass
-        class C(object):
-            x = field(str)
-
-        c = C('hello')
-        r = repr(c)
-        self.assertIn('hello', r)
-
-    def test_eq_with_subclass(self):
-        @dataclass
-        class Base(object):
-            x = field(int)
-
-        @dataclass
-        class Derived(Base):
-            y = field(int, default=0)
-
-        b = Base(1)
-        d = Derived(1)
-        self.assertNotEqual(b, d)
-
-    def test_hash_stable(self):
-        @dataclass(unsafe_hash=True)
-        class C(object):
-            x = field(int)
-            y = field(int)
-
-        c = C(1, 2)
-        h1 = hash(c)
-        h2 = hash(c)
-        self.assertEqual(h1, h2)
-
-class TestWeakref(unittest.TestCase):
-    def test_weakref_to_dataclass(self):
-        @dataclass
-        class C(object):
-            x = field(int)
-
-        c = C(1)
-        w = weakref.ref(c)
-        self.assertIs(w(), c)
-
-        del c
-        self.assertIsNone(w())
-
-    def test_weakref_with_slots(self):
-        @dataclass
-        class C(object):
-            __slots__ = ()
-            x = field(int, default=1)
-
-        c = C()
-        with self.assertRaisesRegexp(TypeError, 'cannot create weak reference'):
-            weakref.ref(c)
-
-class TestCopy(unittest.TestCase):
-    def test_shallow_copy(self):
-        @dataclass
-        class C(object):
-            x = field(list, default_factory=list)
-
-        c1 = C([1, 2, 3])
-        c2 = copy.copy(c1)
-        self.assertEqual(c1, c2)
-        self.assertIs(c1.x, c2.x)
-
-    def test_deep_copy(self):
-        @dataclass
-        class C(object):
-            x = field(list, default_factory=list)
-
-        c1 = C([1, 2, 3])
-        c2 = copy.deepcopy(c1)
-        self.assertEqual(c1, c2)
-        self.assertIsNot(c1.x, c2.x)
-        self.assertEqual(c1.x, c2.x)
-
-class TestClassVar(unittest.TestCase):
-    def test_classvar_excluded(self):
-        from typing import ClassVar
-        @dataclass
-        class C(object):
-            x = field(int)
-            y = field(ClassVar[int])
-            y = 10
-
-        c = C(1)
-        self.assertEqual(c.x, 1)
-        self.assertEqual(C.y, 10)
-        self.assertNotIn('y', fields(C).__dict__ if hasattr(fields(C), '__dict__') else dir(fields(C)))
-
-class TestPicakle(unittest.TestCase):
-    def test_pickle_basic(self):
-        @dataclass
-        class C(object):
-            x = field(int)
-            y = field(str)
-
-        c = C(1, 'hello')
-        with expose_to_test(C):
-            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                with self.subTest(proto=proto):
-                    p = pickle.loads(pickle.dumps(c, proto))
-                    self.assertEqual(p.x, 1)
-                    self.assertEqual(p.y, 'hello')
-
-    def test_pickle_with_default(self):
-        @dataclass
-        class C(object):
-            x = field(int)
-            y = field(int, default=10)
-
-        c = C(5)
-        with expose_to_test(C):
-            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                with self.subTest(proto=proto):
-                    p = pickle.loads(pickle.dumps(c, proto))
-                    self.assertEqual(p.x, 5)
-                    self.assertEqual(p.y, 10)
 
 class TestFrozen(unittest.TestCase):
     def test_inherit_frozen_mutliple_inheritance(self):

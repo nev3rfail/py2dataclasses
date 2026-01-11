@@ -75,11 +75,15 @@ def render_test_diff(tests_dict, name_list):
 
     print("Test classes and their tests:\n")
     for container, tests in tests_dict.items():
-        print(container)
+        if tests:
+            print()
+            print(container)
         for t in tests:
-            print(f"  - {len(t)} {name_list[tests.index(t)]} {(", ".join(t))}")
+            if t:
+                print(f"  - {len(t)} {name_list[tests.index(t)]} {(", ".join(t))}")
+            else: pass
             total += len(t)
-        print(f"  ({len(tests)} tests)\n")
+        #print(f"  ({len(tests)} tests)\n")
         #total += len(tests)
 
     print(f"Total number of tests: {total}")
@@ -87,19 +91,27 @@ def render_test_diff(tests_dict, name_list):
 def diff_lists(list1, list2):
     set1 = set(list1)
     set2 = set(list2)
-    return set1-set2, set2-set1
+    # (missing from first, missing from second)
+    return list(set2 - set1), list(set1 - set2)
+
 
 def diff_dicts(dict1, dict2, name_filter):
+    names1 = {name_filter(k): k for k in dict1}
+    names2 = {name_filter(k): k for k in dict2}
+
     ret = {}
-    for key in dict1:
-        dict1_name = name_filter(key)
-        #if dict1_name not in dict2:
-        ##    pass
-        for key2 in dict2:
-            dict2_name = name_filter(key2)
-            if dict1_name == dict2_name:
-                ret[dict1_name] = diff_lists(dict2[key2], dict1[key])
+
+    for name in set(names1) | set(names2):
+        k1 = names1.get(name)
+        k2 = names2.get(name)
+
+        v1 = dict1[k1] if k1 is not None else []
+        v2 = dict2[k2] if k2 is not None else []
+
+        ret[name] = diff_lists(v1, v2)
+
     return ret
+
 def get_tests_data(module_name):
     by_class, standalone = analyze_tests(module_name) ## os.path.abspath(tests_dir)
     total = 0
@@ -107,6 +119,7 @@ def get_tests_data(module_name):
     #print("Test classes and their tests:\n")
     for cls, tests in sorted(by_class.items(), key=lambda x: x[0].__name__):
         _name = f"{cls.__module__}.{cls.__name__}"
+        _name = _prepare_module_name(_name)
         if _name not in ret:
             ret[_name] = []
         _t = [t._testMethodName for t in tests]
@@ -121,23 +134,16 @@ def get_tests_data(module_name):
             total +=1
     return total, ret
 
-if __name__ == "__main__":
-    #tests_dir = os.path.abspath("tests/py27")  # path to your tests dir
+_prepare_module_name = lambda x: x.replace("_py27", "").replace("_py314", "")
 
+if __name__ == "__main__":
     total314, data314 = get_tests_data("test_Dataclasses_py314")
 
     sys.modules["unittest"] = sys.modules["unittest2"]
 
     total, data = get_tests_data("test_Dataclasses_py27")
-
-    render_test_dir(data)
-
-    print("========================")
-    render_test_dir(data314)
-    print("total", total)
-    print("total314", total314)
-    f = diff_dicts(data, data314, lambda x: x.replace("_py27", "").replace("_py314", ""))
-    render_test_diff(f, ["missing", "extra"])
+    f = diff_dicts(data314, data, lambda x: x.replace("_py27", "").replace("_py314", ""))
+    render_test_diff(f, ["extra", "missing"])
     pass
 
 
