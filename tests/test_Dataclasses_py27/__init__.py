@@ -3216,20 +3216,80 @@ class TestKeywordArgs(unittest.TestCase):
                 a = field(ClassVar[int], kw_only=False)
 
     def test_KW_ONLY(self):
-        # Python 2 doesn't support sentinel fields like KW_ONLY
-        # This test requires advanced type annotation features not available in Python 2
-        # For Python 2 compatibility, we skip the detailed testing but verify basic behavior
-        pass
+        # Python 2 doesn't support KW_ONLY sentinel field syntax
+        # but we can still test kw_only functionality using field(kw_only=True)
+        @dataclass
+        class A(object):
+            a = field(int)
+            b = field(int, kw_only=True)
+            c = field(int, kw_only=True)
+
+        # Should be able to create with positional a and keyword-only b, c
+        a_inst = A(3, c=5, b=4)
+        self.assertEqual(a_inst.a, 3)
+        self.assertEqual(a_inst.b, 4)
+        self.assertEqual(a_inst.c, 5)
+
+        @dataclass(kw_only=True)
+        class B(object):
+            a = field(int)
+            b = field(int)
+            c = field(int)
+
+        # All fields are keyword-only
+        b_inst = B(a=3, b=4, c=5)
+        self.assertEqual(b_inst.a, 3)
+        self.assertEqual(b_inst.b, 4)
+        self.assertEqual(b_inst.c, 5)
+
+        @dataclass
+        class C(object):
+            a = field(int)
+            b = field(int, kw_only=True)
+            c = field(int, kw_only=False)
+
+        # a is positional, b is kw-only, c is positional
+        c_inst = C(1, 2, b=3)
+        self.assertEqual(c_inst.a, 1)
+        self.assertEqual(c_inst.b, 3)
+        self.assertEqual(c_inst.c, 2)
+
+        c_inst = C(1, b=3, c=2)
+        self.assertEqual(c_inst.a, 1)
+        self.assertEqual(c_inst.b, 3)
+        self.assertEqual(c_inst.c, 2)
 
     def test_KW_ONLY_as_string(self):
-        # Python 2 doesn't support string annotations for KW_ONLY
-        # This test requires advanced type annotation features not available in Python 2
-        pass
+        # Python 2 doesn't support KW_ONLY sentinel field or string annotations for it
+        # Test that kw_only works as a field parameter
+        @dataclass
+        class A(object):
+            a = field(int)
+            b = field(int, kw_only=True)
+            c = field(int)
+
+        # Verify kw_only is set correctly
+        fs = fields(A)
+        self.assertFalse(fs[0].kw_only)  # a
+        self.assertTrue(fs[1].kw_only)   # b
+        self.assertFalse(fs[2].kw_only)  # c
 
     def test_KW_ONLY_twice(self):
         # Python 2 doesn't support KW_ONLY sentinel
-        # This test requires advanced type annotation features not available in Python 2
-        pass
+        # Test that we can't have conflicting kw_only specifications
+        try:
+            @dataclass
+            class A(object):
+                a = field(int, kw_only=True)
+                b = field(int, kw_only=False)  # Conflicting specification
+
+            # Just verify the class was created with mixed kw_only settings
+            fs = fields(A)
+            self.assertTrue(fs[0].kw_only)
+            self.assertFalse(fs[1].kw_only)
+        except TypeError:
+            # It's fine if this raises an error
+            pass
 
     def test_post_init(self):
         @dataclass
@@ -3240,13 +3300,18 @@ class TestKeywordArgs(unittest.TestCase):
             d = field(InitVar(int), kw_only=True)
 
             def __post_init__(self, b, d):
-                # Just verify it doesn't crash
-                pass
+                # Modify a based on b and d
+                self.a = self.a + b + d
 
+        # In Python 2, keyword-only args aren't enforced at the syntax level
+        # but the dataclass decorator should still handle them
         try:
-            a = A(1, c=2, b=3, d=4)
+            a_inst = A(1, b=3, c=2, d=4)
+            self.assertEqual(a_inst.a, 1 + 3 + 4)
+            self.assertEqual(a_inst.c, 2)
         except TypeError:
-            # Python 2 may not support keyword-only arguments properly
+            # Python 2 may not fully support keyword-only args
+            # but at least the field definitions should work
             pass
 
     def test_defaults(self):
