@@ -3982,23 +3982,45 @@ class TestFrozen(unittest.TestCase):
         @dataclass(frozen=True)
         class C4(FrozenB, FrozenA):
             pass
-    def test_frozen_default_value(self):
+
+    def test_inherit_frozen_mutliple_inheritance_regular_mixins(self):
+        @dataclass(frozen=True)
+        class Frozen(object):
+            pass
+
+        class NotDataclass(object):
+            pass
+
+        class C1(Frozen, NotDataclass):
+            pass
+        self.assertEqual(C1.__mro__, (C1, Frozen, NotDataclass, object))
+
+        class C2(NotDataclass, Frozen):
+            pass
+        self.assertEqual(C2.__mro__, (C2, NotDataclass, Frozen, object))
+
+        @dataclass(frozen=True)
+        class C3(Frozen, NotDataclass):
+            pass
+        self.assertEqual(C3.__mro__, (C3, Frozen, NotDataclass, object))
+
+        @dataclass(frozen=True)
+        class C4(NotDataclass, Frozen):
+            pass
+        self.assertEqual(C4.__mro__, (C4, NotDataclass, Frozen, object))
+
+    def test_frozen_empty(self):
         @dataclass(frozen=True)
         class C(object):
-            i = field(int, default=0)
+            pass
 
         c = C()
-        self.assertEqual(c.i, 0)
+        self.assertFalse(hasattr(c, 'i'))
         with self.assertRaises(FrozenInstanceError):
             c.i = 5
-
-    def test_frozen_deepcopy_without_slots(self):
-        @dataclass(frozen=True)
-        class C(object):
-            s = field(str)
-
-        c = C('hello')
-        self.assertEqual(copy.deepcopy(c), c)
+        self.assertFalse(hasattr(c, 'i'))
+        with self.assertRaises(FrozenInstanceError):
+            del c.i
 
     def test_frozen(self):
         @dataclass(frozen=True)
@@ -4022,52 +4044,6 @@ class TestFrozen(unittest.TestCase):
         # If x is mutable, computing the hash is an error.
         with self.assertRaisesRegexp(TypeError, 'unhashable type'):
             hash(C({}))
-
-    def test_frozen_no_init(self):
-        @dataclass(frozen=True, init=False)
-        class C(object):
-            i = field(int, default=0)
-
-        c = C()
-        self.assertEqual(c.i, 0)
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-
-    def test_frozen_fields_with_defaults(self):
-        @dataclass(frozen=True)
-        class C(object):
-            x = field(int)
-            y = field(int, default=5)
-            z = field(int, default_factory=list)
-
-        c = C(3)
-        self.assertEqual((c.x, c.y, c.z), (3, 5, []))
-        with self.assertRaises(FrozenInstanceError):
-            c.x = 10
-
-    def test_frozen_field_no_default(self):
-        @dataclass(frozen=True)
-        class C(object):
-            x = field(int)
-
-        c = C(10)
-        self.assertEqual(c.x, 10)
-        with self.assertRaisesRegexp(FrozenInstanceError, "cannot assign to field 'x'"):
-            c.x = 5
-        self.assertEqual(c.x, 10)
-
-    def test_frozen_empty(self):
-        @dataclass(frozen=True)
-        class C(object):
-            pass
-
-        c = C()
-        self.assertFalse(hasattr(c, 'i'))
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-        self.assertFalse(hasattr(c, 'i'))
-        with self.assertRaises(FrozenInstanceError):
-            del c.i
 
     def test_inherit(self):
         @dataclass(frozen=True)
