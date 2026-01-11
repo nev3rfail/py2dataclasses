@@ -55,7 +55,7 @@ def analyze_tests(module_name):
     walk(root_suite)
     return by_class, standalone
 
-def render_test_dir(tests_dict):
+def render_test_dir(tests_dict, deeper=False):
     #by_class, standalone = analyze_tests(tests_dir) ## os.path.abspath(tests_dir)
     total = 0
 
@@ -66,6 +66,21 @@ def render_test_dir(tests_dict):
             print(f"  - {t}")
         print(f"  ({len(tests)} tests)\n")
         total += len(tests)
+
+    print(f"Total number of tests: {total}")
+
+def render_test_diff(tests_dict, name_list):
+    #by_class, standalone = analyze_tests(tests_dir) ## os.path.abspath(tests_dir)
+    total = 0
+
+    print("Test classes and their tests:\n")
+    for container, tests in tests_dict.items():
+        print(container)
+        for t in tests:
+            print(f"  - {len(t)} {name_list[tests.index(t)]} {(", ".join(t))}")
+            total += len(t)
+        print(f"  ({len(tests)} tests)\n")
+        #total += len(tests)
 
     print(f"Total number of tests: {total}")
 
@@ -122,7 +137,7 @@ if __name__ == "__main__":
     print("total", total)
     print("total314", total314)
     f = diff_dicts(data, data314, lambda x: x.replace("_py27", "").replace("_py314", ""))
-    render_test_dir(f)
+    render_test_diff(f, ["missing", "extra"])
     pass
 
 
