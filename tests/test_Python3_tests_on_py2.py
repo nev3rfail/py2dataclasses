@@ -10,16 +10,16 @@ import src.dataclasses as py2dataclasses
 from collections import OrderedDict
 import unittest
 
-def field_adapter(_typ, *args, **kwargs):
-    f = field(*args, **kwargs)
-    f.type = _typ
+def field_adapter(*args, **kwargs):
+    f = py2dataclasses.field(*args, **kwargs)
+    #f.type = _typ
     return f
 
 def collect_annotations(cls):
     items = {}
     i = 0
     for name, value in cls.__dict__.items():
-        if isinstance(value, Field):
+        if isinstance(value, py2dataclasses.Field):
             t = value.type
             if t is None:
                 raise TypeError(
@@ -45,10 +45,10 @@ def annotate(__annotations__, **kwargs):
     return dec
 
 def _dataclass_adapter(cls, *args, **kwargs):
-    ann = collect_annotations(cls)
-    if ann:
-        annotate(ann)(cls)
-    f = dataclass(cls, *args, **kwargs)
+    #ann = collect_annotations(cls)
+    #if ann:
+    #    annotate(ann)(cls)
+    f = py2dataclasses.dataclass(cls, *args, **kwargs)
     #f.type = _typ
     return f
 
@@ -65,8 +65,13 @@ def dataclass_adapter(cls=None, *args, **kwargs):
 
 def patch_test(target_module):
     field_list = ('fields', 'field', 'Field', 'dataclass', 'is_dataclass', 'replace', 'make_dataclass', 'asdict', 'astuple', 'FrozenInstanceError', 'MISSING', '_oneshot')
+    patch_map = {"field": field_adapter, "dataclass": dataclass_adapter}
     for one in field_list:
-        target_module.__setattr__(one, getattr(py2dataclasses, one))
+
+        if one in patch_map:
+            target_module.__setattr__(one, patch_map[one])
+        else:
+            target_module.__setattr__(one, getattr(py2dataclasses, one))
 
 
 def load_tests(loader, tests, pattern):
