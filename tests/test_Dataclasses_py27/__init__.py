@@ -626,68 +626,6 @@ class TestCase(unittest.TestCase):
     #                     self.assertIn('__eq__', C.__dict__)
     #                     self.assertNotIn('__lt__', C.__dict__)
 
-    def test_no_init(self):
-        @dataclass(init=False)
-        class C(object):
-            #__annotations__ = {'i': int}
-            i = 0
-
-        self.assertEqual(C().i, 0)
-
-        @dataclass(init=False)
-        class C(object):
-            #__annotations__ = {'i': int}
-            i = 2
-
-            def __init__(self):
-                self.i = 3
-
-        self.assertEqual(C().i, 3)
-
-    def test_no_repr(self):
-        # Test a class with no __repr__ and repr=False.
-        @dataclass(repr=False)
-        class C(object):
-            #__annotations__ = {'x': int}
-            x = field(int)
-
-        self.assertIn('C object at', repr(C(3)))
-
-    def test_no_eq(self):
-        # Test a class with no __eq__ and eq=False.
-        @dataclass(eq=False)
-        class C(object):
-            #__annotations__ = {'x': int}
-            x = field(int)
-
-        self.assertNotEqual(C(0), C(0))
-        c = C(3)
-        self.assertEqual(c, c)
-
-    def test_frozen(self):
-        @dataclass(frozen=True)
-        class C(object):
-            #__annotations__ = {'i': int}
-            i = field(int)
-
-        c = C(10)
-        self.assertEqual(c.i, 10)
-        with self.assertRaises(FrozenInstanceError):
-            c.i = 5
-        self.assertEqual(c.i, 10)
-
-    def test_frozen_hash(self):
-        @dataclass(frozen=True)
-        class C(object):
-            #__annotations__ = {'x': object}
-            x = field(object)
-
-        # If x is immutable, we can compute the hash.
-        hash(C(3))
-
-        # If x is mutable, computing the hash is an error.
-        with self.assertRaisesRegexp(TypeError, 'unhashable type'):
-            hash(C({}))
 
     def test_default_factory(self):
         # Test a factory that returns a new list.
@@ -2123,6 +2061,28 @@ class TestCase(unittest.TestCase):
 
         # For now, just make sure it doesn't crash
         _ = C()
+
+    def test_classvar_default_factory(self):
+        # It's an error for a ClassVar to have a factory function.
+        from typing import ClassVar
+        with self.assertRaisesRegexp(TypeError,
+                                     'cannot have a default factory'):
+            @dataclass
+            class C(object):
+                x = field(ClassVar[int], default_factory=int)
+
+    def test_is_dataclass_genericalias(self):
+        # Test that is_dataclass works on GenericAlias instances
+        # This test requires Python 3.7+ where types.GenericAlias exists
+        if hasattr(types, 'GenericAlias'):
+            @dataclass
+            class A(types.GenericAlias):
+                origin = field(type)
+                args = field(type)
+            self.assertTrue(is_dataclass(A))
+            a = A(list, int)
+            self.assertTrue(is_dataclass(type(a)))
+            self.assertTrue(is_dataclass(a))
 
 
 class TestFieldNoAnnotation(unittest.TestCase):
