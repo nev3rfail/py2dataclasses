@@ -19,7 +19,7 @@ import funcsigs
 from collections import OrderedDict
 
 
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.append(path)
 from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
@@ -1437,7 +1437,7 @@ class TestCase(unittest.TestCase):
             x = field(int)
             y = field(int)
 
-        self.assertEqual(A.__qualname__, 'TestCase.test_dataclasses_qualnames.<locals>.A')
+        self.assertEqual(A.__qualname__, self.__module__+".A")
 
     def test_class_var(self):
         # Make sure ClassVars are ignored in __init__, __repr__, etc.
@@ -2050,7 +2050,9 @@ class TestCase(unittest.TestCase):
         try:
             fields(object)
         except TypeError as exc:
-            traceback.print_exception(type(exc), exc, exc.__traceback__, file=stdout)
+            s =traceback.format_exc(10)
+            print(s.decode("utf-8"), file=stdout)
+            #traceback.print_exception(type(exc), exc, sys.exc_info()[2], file=stdout)
         printed_traceback = stdout.getvalue()
         self.assertNotIn("AttributeError", printed_traceback)
         self.assertNotIn("__dataclass_fields__", printed_traceback)
@@ -2073,17 +2075,15 @@ class TestCase(unittest.TestCase):
                 x = field(ClassVar[int], default_factory=int)
 
     def test_is_dataclass_genericalias(self):
-        # Test that is_dataclass works on GenericAlias instances
-        # This test requires Python 3.7+ where types.GenericAlias exists
-        if hasattr(types, 'GenericAlias'):
-            @dataclass
-            class A(types.GenericAlias):
-                origin = field(type)
-                args = field(type)
-            self.assertTrue(is_dataclass(A))
-            a = A(list, int)
-            self.assertTrue(is_dataclass(type(a)))
-            self.assertTrue(is_dataclass(a))
+
+        @dataclass
+        class A(types.GenericAlias):
+            origin = field(type)
+            args = field(type)
+        self.assertTrue(is_dataclass(A))
+        a = A(list, int)
+        self.assertTrue(is_dataclass(type(a)))
+        self.assertTrue(is_dataclass(a))
 
 
 class TestFieldNoAnnotation(unittest.TestCase):
@@ -2302,26 +2302,26 @@ class TestMakeDataclass(unittest.TestCase):
         # Test that dataclasses created with make_dataclass can be pickled
         C = make_dataclass('C', [('x', int)])
         c = C(10)
-
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                pickled = pickle.dumps(c, proto)
-                unpickled = pickle.loads(pickled)
-                self.assertEqual(c, unpickled)
-                self.assertEqual(c.x, unpickled.x)
+        with expose_to_test(C):
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    pickled = pickle.dumps(c, proto)
+                    unpickled = pickle.loads(pickled)
+                    self.assertEqual(c, unpickled)
+                    self.assertEqual(c.x, unpickled.x)
 
     def test_cannot_be_pickled(self):
         # Test that dataclasses with wrong module cannot be pickled reliably
         # For Python 2, we just verify basic pickle behavior works
         C = make_dataclass('C', [('x', int)])
         c = C(10)
-
-        # Should be pickleable normally
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            with self.subTest(proto=proto):
-                pickled = pickle.dumps(c, proto)
-                unpickled = pickle.loads(pickled)
-                self.assertEqual(c.x, unpickled.x)
+        with expose_to_test(C):
+            # Should be pickleable normally
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                with self.subTest(proto=proto):
+                    pickled = pickle.dumps(c, proto)
+                    unpickled = pickle.loads(pickled)
+                    self.assertEqual(c.x, unpickled.x)
 
     def test_module_attr(self):
         # Test that module is set correctly
@@ -3275,21 +3275,17 @@ class TestKeywordArgs(unittest.TestCase):
         self.assertFalse(fs[2].kw_only)  # c
 
     def test_KW_ONLY_twice(self):
-        # Python 2 doesn't support KW_ONLY sentinel
-        # Test that we can't have conflicting kw_only specifications
-        try:
-            @dataclass
-            class A(object):
-                a = field(int, kw_only=True)
-                b = field(int, kw_only=False)  # Conflicting specification
 
-            # Just verify the class was created with mixed kw_only settings
-            fs = fields(A)
-            self.assertTrue(fs[0].kw_only)
-            self.assertFalse(fs[1].kw_only)
-        except TypeError:
-            # It's fine if this raises an error
-            pass
+        @dataclass
+        class A(object):
+            a = field(int, kw_only=True)
+            b = field(int, kw_only=False)  # Conflicting specification
+
+        # Just verify the class was created with mixed kw_only settings
+        fs = fields(A)
+        self.assertTrue(fs[0].kw_only)
+        self.assertFalse(fs[1].kw_only)
+
 
     def test_post_init(self):
         @dataclass
@@ -3303,16 +3299,10 @@ class TestKeywordArgs(unittest.TestCase):
                 # Modify a based on b and d
                 self.a = self.a + b + d
 
-        # In Python 2, keyword-only args aren't enforced at the syntax level
-        # but the dataclass decorator should still handle them
-        try:
-            a_inst = A(1, b=3, c=2, d=4)
-            self.assertEqual(a_inst.a, 1 + 3 + 4)
-            self.assertEqual(a_inst.c, 2)
-        except TypeError:
-            # Python 2 may not fully support keyword-only args
-            # but at least the field definitions should work
-            pass
+
+        a_inst = A(1, b=3, c=2, d=4)
+        self.assertEqual(a_inst.a, 1 + 3 + 4)
+        self.assertEqual(a_inst.c, 2)
 
     def test_defaults(self):
         # For kwargs, make sure we can have defaults after non-defaults.
@@ -3828,95 +3818,75 @@ class TestSlots(unittest.TestCase):
         B()
 
     def test_dataclass_derived_generic(self):
-        # This test requires Python 3.9+ typing features
-        # For Python 2, we skip detailed testing
-        try:
-            import typing
-            T = typing.TypeVar('T')
 
-            @dataclass(slots=True, weakref_slot=True)
-            class A(typing.Generic[T]):
-                pass
-            self.assertEqual(A.__slots__, ('__weakref__',))
-            A()
-        except (AttributeError, TypeError):
-            # Skip if typing.Generic is not available properly
+        import typing
+        T = typing.TypeVar('T')
+
+        @dataclass(slots=True, weakref_slot=True)
+        class A(typing.Generic[T]):
             pass
+        self.assertEqual(A.__slots__, ('__weakref__',))
+        A()
 
     def test_dataclass_derived_generic_from_base(self):
-        # This test requires Python 3.9+ typing features
-        # For Python 2, we skip detailed testing
-        try:
-            import typing
-            T = typing.TypeVar('T')
 
-            class RawBase(object):
-                pass
+        import typing
+        T = typing.TypeVar('T')
 
-            @dataclass(slots=True, weakref_slot=True)
-            class C1(typing.Generic[T], RawBase):
-                pass
-            self.assertEqual(C1.__slots__, ())
-            C1()
-
-            @dataclass(slots=True, weakref_slot=True)
-            class C2(RawBase, typing.Generic[T]):
-                pass
-            self.assertEqual(C2.__slots__, ())
-            C2()
-        except (AttributeError, TypeError):
-            # Skip if typing.Generic is not available properly
+        class RawBase(object):
             pass
+
+        @dataclass(slots=True, weakref_slot=True)
+        class C1(typing.Generic[T], RawBase):
+            pass
+        self.assertEqual(C1.__slots__, ())
+        C1()
+
+        @dataclass(slots=True, weakref_slot=True)
+        class C2(RawBase, typing.Generic[T]):
+            pass
+        self.assertEqual(C2.__slots__, ())
+        C2()
 
     def test_dataclass_derived_generic_from_slotted_base(self):
-        # This test requires Python 3.9+ typing features
-        # For Python 2, we skip detailed testing
-        try:
-            import typing
-            T = typing.TypeVar('T')
+        import typing
+        T = typing.TypeVar('T')
 
-            class WithSlots(object):
-                __slots__ = ('a', 'b')
+        class WithSlots(object):
+            __slots__ = ('a', 'b')
 
-            @dataclass(slots=True, weakref_slot=True)
-            class E1(WithSlots, typing.Generic[T]):
-                pass
-            self.assertEqual(E1.__slots__, ('__weakref__',))
-            E1()
-
-            @dataclass(slots=True, weakref_slot=True)
-            class E2(typing.Generic[T], WithSlots):
-                pass
-            self.assertEqual(E2.__slots__, ('__weakref__',))
-            E2()
-        except (AttributeError, TypeError):
-            # Skip if typing.Generic is not available properly
+        @dataclass(slots=True, weakref_slot=True)
+        class E1(WithSlots, typing.Generic[T]):
             pass
+        self.assertEqual(E1.__slots__, ('__weakref__',))
+        E1()
+
+        @dataclass(slots=True, weakref_slot=True)
+        class E2(typing.Generic[T], WithSlots):
+            pass
+        self.assertEqual(E2.__slots__, ('__weakref__',))
+        E2()
+
 
     def test_dataclass_derived_generic_from_slotted_base_with_weakref(self):
-        # This test requires Python 3.9+ typing features
-        # For Python 2, we skip detailed testing
-        try:
-            import typing
-            T = typing.TypeVar('T')
 
-            class WithWeakrefSlot(object):
-                __slots__ = ('__weakref__',)
+        import typing
+        T = typing.TypeVar('T')
 
-            @dataclass(slots=True, weakref_slot=True)
-            class G1(WithWeakrefSlot, typing.Generic[T]):
-                pass
-            self.assertEqual(G1.__slots__, ())
-            G1()
+        class WithWeakrefSlot(object):
+            __slots__ = ('__weakref__',)
 
-            @dataclass(slots=True, weakref_slot=True)
-            class G2(typing.Generic[T], WithWeakrefSlot):
-                pass
-            self.assertEqual(G2.__slots__, ())
-            G2()
-        except (AttributeError, TypeError):
-            # Skip if typing.Generic is not available properly
+        @dataclass(slots=True, weakref_slot=True)
+        class G1(WithWeakrefSlot, typing.Generic[T]):
             pass
+        self.assertEqual(G1.__slots__, ())
+        G1()
+
+        @dataclass(slots=True, weakref_slot=True)
+        class G2(typing.Generic[T], WithWeakrefSlot):
+            pass
+        self.assertEqual(G2.__slots__, ())
+        G2()
 
     def test_slots_weakref_base_str(self):
         class Base(object):
@@ -4110,24 +4080,20 @@ class TestSlots(unittest.TestCase):
                 # Just verify the class was created
                 self.assertIsNotNone(C)
 
+    @unittest.skipIf(lambda x: hasattr(_testcapi, "HeapCTypeWithDict") is False, "Python 2.7 does not expose these types")
     def test_dataclass_slot_dict_ctype(self):
-        # This test requires _testcapi which is not available in Python 2
-        # For Python 2, we skip this test
-        try:
-            import _testcapi
 
-            @dataclass(slots=True)
-            class HasDictOffset(_testcapi.HeapCTypeWithDict):
-                __dict__ = {}
-            self.assertEqual(HasDictOffset.__slots__, ())
+        import _testcapi
+        import ctypes
+        @dataclass(slots=True)
+        class HasDictOffset(_testcapi.HeapCTypeWithDict):
+            __dict__ = {}
+        self.assertEqual(HasDictOffset.__slots__, ())
 
-            @dataclass(slots=True)
-            class DoesNotHaveDictOffset(_testcapi.HeapCTypeWithWeakref):
-                __dict__ = {}
-            self.assertIn('__dict__', DoesNotHaveDictOffset.__slots__)
-        except ImportError:
-            # Skip if _testcapi is not available
-            pass
+        @dataclass(slots=True)
+        class DoesNotHaveDictOffset(_testcapi.HeapCTypeWithWeakref):
+            __dict__ = {}
+        self.assertIn('__dict__', DoesNotHaveDictOffset.__slots__)
 
     def test_returns_new_class(self):
         class A(object):

@@ -15,7 +15,7 @@ from .abc_utils import update_abstractmethods
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
-from .class_utils import is_descriptor
+from .class_utils import is_descriptor, qualname
 from dictproxyhack import dictproxy
 import typing
 MappingProxyType = dictproxy
@@ -584,7 +584,7 @@ def _frozen_get_del_attr(cls, fields, func_builder):
 
 
 def _is_classvar(a_type, typing):
-    return (a_type is typing.ClassVar
+    return (a_type is typing.ClassVar or type(a_type) == type(typing.ClassVar)
             or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar))
 
 
@@ -965,7 +965,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
-
+    cls.__qualname__ = qualname(cls)
     doc_attr = getattr(cls, '__doc__')
     if doc_attr is None:
         doc_string = ""
@@ -1088,10 +1088,11 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
         cls_dict.pop(field_name, None)
 
     # And finally create the class.
-    qualname = getattr(cls, '__qualname__', None)
-    newcls = type(cls)(cls.__name__, cls.__bases__, cls_dict)
-    if qualname is not None:
-        newcls.__qualname__ = qualname
+    qualname = getattr(cls, '__qualname__', getattr(cls, '__name__', None))
+    newcls = type(cls)(cls.__name__, cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__, cls_dict)
+
+    if qualname is not None and getattr(newcls, "__qualname__", None):
+            newcls.__qualname__ = qualname
 
     if is_frozen:
         # Need this for pickling frozen classes with slots.
@@ -1125,14 +1126,14 @@ def annotate(__annotations__, **kwargs):
     """Python 3 compatible function annotation for Python 2."""
     if __annotations__ and not kwargs:
         kwargs = __annotations__
-    if not kwargs:
+    if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
         if hasattr(f, '__annotations__'):
             for k, v in kwargs.items():
                 f.__annotations__[k] = v
         else:
-            f.__annotations__ = OrderedDict(kwargs)
+            setattr(f, "__annotations__", OrderedDict(kwargs))
         return f
     return dec
 
@@ -1157,6 +1158,8 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
         annotations = collect_annotations(cls)
         if annotations:
             annotate(__annotations__=annotations)(cls)
+        else:
+            annotate(__annotations__={})(cls)
 
         return _process_class(cls, init, repr, eq, order, unsafe_hash,
                               frozen, match_args, kw_only, slots,
