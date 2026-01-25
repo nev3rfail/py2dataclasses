@@ -1,4 +1,4 @@
-from __future__ import annotations
+#from __future__ import annotations
 
 import dataclasses
 
@@ -9,4 +9,4 @@ class Foo:
 
 @dataclasses.dataclass
 class Bar:
-    foo: Foo
+    foo = dataclasses.field(Foo)

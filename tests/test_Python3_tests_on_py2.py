@@ -1,10 +1,12 @@
 import sys
 import os
 import six
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "dataclasses"))
+path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, path)
-
-import src.dataclasses as py2dataclasses
+path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path.insert(0, path)
+print(sys.path)
+import py2dataclasses.dataclasses as py2dataclasses
 # from src.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
 #     astuple, FrozenInstanceError, MISSING, _oneshot
 from collections import OrderedDict
@@ -76,13 +78,14 @@ def patch_test(target_module):
 
 def load_tests(loader, tests, pattern):
     # Import the real test module
-    mod = __import__("test_Dataclasses_py314")
+    mod = __import__("tests.test_Dataclasses_py314")
+    mod = mod.test_Dataclasses_py314
     patch_test(mod)
-    suite = loader.loadTestsFromModule(mod)
+    suite = loader.loadTestsFromName("tests.test_Dataclasses_py314")
     return suite
 
 if __name__ == '__main__':
     loader = unittest.TestLoader()
-    root_suite = loader.loadTestsFromName("test_Dataclasses_py314")
+    root_suite = loader.loadTestsFromName("tests.test_Dataclasses_py314")
     patch_test(sys.modules["test_Dataclasses_py314"])
     runner = unittest.TextTestRunner(verbosity=2)

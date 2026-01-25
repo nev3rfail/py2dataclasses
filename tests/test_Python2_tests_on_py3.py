@@ -6,9 +6,12 @@ import unittest
 #path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 #sys.path.insert(0, path)
 #print(sys.path)
-
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
-    astuple, FrozenInstanceError, MISSING
+try:
+    from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+        astuple, FrozenInstanceError, MISSING
+except:
+    print("wtf")
+    pass
 def field_adapter(_typ, *args, **kwargs):
     f = field(*args, **kwargs)
     f.type = _typ
@@ -76,38 +79,33 @@ def dataclass_adapter(cls=None, *args, **kwargs):
         return _dataclass_adapter(cls)
 
 
-import unittest
-
-def test_running():
-    loader = unittest.TestLoader()
-    root_suite = loader.loadTestsFromName("test_Dataclasses_py27")
-    runner = unittest.TextTestRunner(verbosity=2)
-    object.__setattr__(sys.modules["test_Dataclasses_py27"], "_real_field", sys.modules["test_Dataclasses_py27"].field)
-    object.__setattr__(sys.modules["test_Dataclasses_py27"], "field", field_adapter)
-    object.__setattr__(sys.modules["test_Dataclasses_py27"], "_real_dataclass", sys.modules["test_Dataclasses_py27"].dataclass)
-    object.__setattr__(sys.modules["test_Dataclasses_py27"], "dataclass", dataclass_adapter)
-    pew = runner.run(root_suite)
-    return pew
 
 
-def load_tests(loader, tests, pattern):
-    # Import the real test module
-    mod = __import__("test_Dataclasses_py27")
 
-    # Monkey-patch before loading tests
+def patch_test(mod):
     object.__setattr__(mod, "_real_field", mod.field)
     object.__setattr__(mod, "field", field_adapter)
 
     object.__setattr__(mod, "_real_dataclass", mod.dataclass)
     object.__setattr__(mod, "dataclass", dataclass_adapter)
 
+    pass
+
+def load_tests(loader, tests, pattern):
+    # Import the real test module
+    mod = __import__("tests.test_Dataclasses_py27")
+    mod = mod.test_Dataclasses_py27
+    patch_test(mod)
+
     # Now load the tests normally
-    suite = loader.loadTestsFromModule(mod)
+    suite = loader.loadTestsFromName("tests.test_Dataclasses_py27")
     return suite
 
 if __name__ == '__main__':
-    test_running()
-    #root_suite.run()
+    loader = unittest.TestLoader()
+    root_suite = loader.loadTestsFromName("tests.test_Dataclasses_py27")
+    patch_test(sys.modules["test_Dataclasses_py27"])
+    runner = unittest.TextTestRunner(verbosity=2)
 
 #test_running()
 #return pew

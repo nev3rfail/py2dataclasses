@@ -15,7 +15,7 @@ __all__ = ['dataclass',
            'make_dataclass',
            'replace',
            'is_dataclass',
-            '_oneshot'
+           '_oneshot'
            #  'of_factory',
            # 'of_typed',
            # 'ann',

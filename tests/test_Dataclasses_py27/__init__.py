@@ -19,11 +19,12 @@ import funcsigs
 from collections import OrderedDict
 
 
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
+path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".."))
 sys.path.append(path)
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
-
+import py2dataclasses.dataclasses as dataclasses
+sys.modules["dataclasses"] = dataclasses
 import unittest2 as unittest
 import pickle
 import copy
@@ -229,7 +230,12 @@ class TestCase(unittest.TestCase):
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
         for f in the_fields:
-            self.assertIn(type(f), [Field, _oneshot])
+            try:
+                from py2dataclasses import _oneshot
+                container = [Field, _oneshot]
+            except:
+                container = [Field]
+            self.assertIn(type(f), container)
             self.assertIn(f.name, C.__annotations__)
 
         self.assertEqual(len(the_fields), 3)
@@ -4107,7 +4113,7 @@ class TestSlots(unittest.TestCase):
         self.assertTrue(hasattr(B, "__slots__"))
 
 
-from dataclasses import *
+#from dataclasses import *
 from typing import *
 class TestStringAnnotations(unittest.TestCase):
     def test_classvar(self):
@@ -4253,7 +4259,7 @@ class TestStringAnnotations(unittest.TestCase):
                 for field_name in ('iv0', 'iv1', 'iv2', 'iv3'):
                     with self.subTest(field_name=field_name):
                         with self.assertRaisesRegexp(AttributeError, "object has no attribute"):
-                            # Since field_name is an InitVar, it's
+                             # Since field_name is an InitVar, it's
                             # not an instance field.
                             getattr(c, field_name)
 

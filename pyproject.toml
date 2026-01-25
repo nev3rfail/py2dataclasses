@@ -1,3 +1,7 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
 [tool.poetry]
 name = "py2dataclasses"
 version = "3.14.2"
@@ -5,6 +9,8 @@ description = "Somewhat PEP-557 compatible python 2.7 dataclasses port"
 authors = ["nev3rfail"]
 license = "MIT"
 readme = "README.md"
+
+
 
 [tool.poetry.dependencies]
 python = "==2.7.18"
