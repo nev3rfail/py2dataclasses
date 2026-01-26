@@ -1,3 +1,5 @@
+import types
+
 import sys
 import os
 import six
@@ -5,7 +7,7 @@ path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, path)
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, path)
-print(sys.path)
+##print(sys.path)
 import py2dataclasses.dataclasses as py2dataclasses
 # from src.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
 #     astuple, FrozenInstanceError, MISSING, _oneshot
@@ -63,6 +65,11 @@ def dataclass_adapter(cls=None, *args, **kwargs):
 
 
 
+def patch_mod(target_module):
+    for mod in dir(target_module):
+        mod = object.__getattribute__(target_module, mod)
+        if type(mod) == types.ModuleType:
+            patch_test(mod)
 
 
 def patch_test(target_module):
@@ -78,14 +85,16 @@ def patch_test(target_module):
 
 def load_tests(loader, tests, pattern):
     # Import the real test module
-    mod = __import__("tests.test_Dataclasses_py314")
-    mod = mod.test_Dataclasses_py314
-    patch_test(mod)
+    mod = __import__("tests.test_Dataclasses_py314.tests")
+    #mod = mod.test_Dataclasses_py314
+    patch_mod(sys.modules["load_test"])
     suite = loader.loadTestsFromName("tests.test_Dataclasses_py314")
     return suite
 
 if __name__ == '__main__':
     loader = unittest.TestLoader()
     root_suite = loader.loadTestsFromName("tests.test_Dataclasses_py314")
-    patch_test(sys.modules["test_Dataclasses_py314"])
+    #print(root_suite)
+    patch_mod(sys.modules["load_test"])
     runner = unittest.TextTestRunner(verbosity=2)
+    runner.run(root_suite)

@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestHash(unittest.TestCase):
@@ -9,6 +11,14 @@ class TestHash(unittest.TestCase):
         self.assertEqual(hash(C(1, 'foo')), hash((1, 'foo')))
 
     def test_hash_rules(self):
+        def non_bool(value):
+            # Map to something else that's True, but not a bool.
+            if value is None:
+                return None
+            if value:
+                return (3,)
+            return 0
+
         def test(case, unsafe_hash, eq, frozen, with_hash, result):
             with self.subTest(case=case, unsafe_hash=unsafe_hash, eq=eq,
                               frozen=frozen):
@@ -49,6 +59,9 @@ class TestHash(unittest.TestCase):
                             def __hash__(self):
                                 return 0
 
+                else:
+                    assert False, 'unknown result {}'.format(result)
+
         # There are 8 cases of:
         #  unsafe_hash=True/False
         #  eq=True/False
@@ -57,34 +70,57 @@ class TestHash(unittest.TestCase):
         #  __hash__ is defined or not.
         for case, (unsafe_hash,  eq,    frozen, res_no_defined_hash, res_defined_hash) in enumerate([
             (False,        False, False,  '',                  ''),
-            (False,        False, True,   'fn',                'exception'),
-            (False,        True,  False,  'none',              'exception'),
-            (False,        True,  True,   'fn',                'exception'),
+            (False,        False, True,   '',                  ''),
+            (False,        True,  False,  'none',              ''),
+            (False,        True,  True,   'fn',                ''),
             (True,         False, False,  'fn',                'exception'),
             (True,         False, True,   'fn',                'exception'),
             (True,         True,  False,  'fn',                'exception'),
             (True,         True,  True,   'fn',                'exception'),
-        ]):
-            for with_hash in (False, True):
-                if with_hash:
-                    expected = res_defined_hash
-                else:
-                    expected = res_no_defined_hash
-                test(case, unsafe_hash, eq, frozen, with_hash, expected)
+        ], 1):
+            test(case, unsafe_hash, eq, frozen, False, res_no_defined_hash)
+            test(case, unsafe_hash, eq, frozen, True,  res_defined_hash)
 
+            # Test non-bool truth values, too.  This is just to
+            #  make sure the data-driven table in the decorator
+            #  handles non-bool values.
+            test(case, non_bool(unsafe_hash), non_bool(eq), non_bool(frozen), False, res_no_defined_hash)
+            test(case, non_bool(unsafe_hash), non_bool(eq), non_bool(frozen), True,  res_defined_hash)
 
-    def test_hash_no_args(self):
-        # Test dataclasses with no hash= argument.
-        class Base(object):
-            def __hash__(self):
-                return 301
+    def test_eq_only(self):
+        # If a class defines __eq__, __hash__ is automatically added
+        #  and set to None.  This is normal Python behavior, not
+        #  related to dataclasses.  Make sure we don't interfere with
+        #  that (see bpo=32546).
 
-        # frozen=True should auto-generate __hash__
-        @dataclass(frozen=True)
-        class C(Base):
+        @dataclass
+        class C(object):
             i = field(int)
+            def __eq__(self, other):
+                return self.i == other.i
+        self.assertEqual(C(1), C(1))
+        self.assertNotEqual(C(1), C(4))
 
-        self.assertEqual(hash(C(10)), hash((10,)))
+        # And make sure things work in this case if we specify
+        #  unsafe_hash=True.
+        @dataclass(unsafe_hash=True)
+        class C(object):
+            i = field(int)
+            def __eq__(self, other):
+                return self.i == other.i
+        self.assertEqual(C(1), C(1.0))
+        self.assertEqual(hash(C(1)), hash(C(1.0)))
+
+        # And check that the classes __eq__ is being used, despite
+        #  specifying eq=True.
+        @dataclass(unsafe_hash=True, eq=True)
+        class C(object):
+            i = field(int)
+            def __eq__(self, other):
+                return self.i == 3 and self.i == other.i
+        self.assertEqual(C(3), C(3))
+        self.assertNotEqual(C(1), C(1))
+        self.assertEqual(hash(C(1)), hash(C(1.0)))
 
     def test_0_field_hash(self):
         @dataclass(frozen=True)
@@ -110,19 +146,77 @@ class TestHash(unittest.TestCase):
         self.assertEqual(hash(C(4)), hash((4,)))
         self.assertEqual(hash(C(42)), hash((42,)))
 
-    def test_eq_only(self):
-        @dataclass
-        class C(object):
-            i = field(int)
-            def __eq__(self, other):
-                return self.i == other.i
-        self.assertEqual(C(1), C(1))
-        self.assertNotEqual(C(1), C(4))
+    def test_hash_no_args(self):
+        # Test dataclasses with no hash= argument.  This exists to
+        #  make sure that if the @dataclass parameter name is changed
+        #  or the non-default hashing behavior changes, the default
+        #  hashability keeps working the same way.
 
-        @dataclass(unsafe_hash=True)
-        class C(object):
-            i = field(int)
-            def __eq__(self, other):
-                return self.i == other.i
-        self.assertEqual(C(1), C(1.0))
-        self.assertEqual(hash(C(1)), hash(C(1.0)))
+        class Base(object):
+            def __hash__(self):
+                return 301
+
+        # If frozen or eq is None, then use the default value (do not
+        #  specify any value in the decorator).
+        for frozen, eq,    base,   expected       in [
+            (None,  None,  object, 'unhashable'),
+            (None,  None,  Base,   'unhashable'),
+            (None,  False, object, 'object'),
+            (None,  False, Base,   'base'),
+            (None,  True,  object, 'unhashable'),
+            (None,  True,  Base,   'unhashable'),
+            (False, None,  object, 'unhashable'),
+            (False, None,  Base,   'unhashable'),
+            (False, False, object, 'object'),
+            (False, False, Base,   'base'),
+            (False, True,  object, 'unhashable'),
+            (False, True,  Base,   'unhashable'),
+            (True,  None,  object, 'tuple'),
+            (True,  None,  Base,   'tuple'),
+            (True,  False, object, 'object'),
+            (True,  False, Base,   'base'),
+            (True,  True,  object, 'tuple'),
+            (True,  True,  Base,   'tuple'),
+        ]:
+
+            with self.subTest(frozen=frozen, eq=eq, base=base, expected=expected):
+                # First, create the class.
+                if frozen is None and eq is None:
+                    @dataclass
+                    class C(base):
+                        i = field(int)
+                elif frozen is None:
+                    @dataclass(eq=eq)
+                    class C(base):
+                        i = field(int)
+                elif eq is None:
+                    @dataclass(frozen=frozen)
+                    class C(base):
+                        i = field(int)
+                else:
+                    @dataclass(frozen=frozen, eq=eq)
+                    class C(base):
+                        i = field(int)
+
+                # Now, make sure it hashes as expected.
+                if expected == 'unhashable':
+                    c = C(10)
+                    with self.assertRaisesRegexp(TypeError, 'unhashable type'):
+                        hash(c)
+
+                elif expected == 'base':
+                    self.assertEqual(hash(C(10)), 301)
+
+                elif expected == 'object':
+                    # I'm not sure what test to use here.  object's
+                    #  hash isn't based on id(), so calling hash()
+                    #  won't tell us much.  So, just check the
+                    #  function used is object's.
+                    self.assertIs(C.__hash__, object.__hash__)
+
+                elif expected == 'tuple':
+                    self.assertEqual(hash(C(42)), hash((42,)))
+
+                else:
+                    assert False, 'unknown value for expected={}'.format(expected)
+

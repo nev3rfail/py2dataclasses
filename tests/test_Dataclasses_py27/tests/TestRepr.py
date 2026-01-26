@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestRepr(unittest.TestCase):
@@ -11,7 +13,6 @@ class TestRepr(unittest.TestCase):
             y = field(int, default=10)
 
         o = C(4)
-        # Align with py3.14 exact repr expectation (may fail on py2)
         self.assertEqual(repr(o), 'TestRepr.test_repr.<locals>.C(x=4, y=10)')
 
         @dataclass
@@ -35,10 +36,7 @@ class TestRepr(unittest.TestCase):
         @dataclass(repr=False)
         class C(object):
             x = field(int)
-        # Align with py3.14: ensure the object repr includes the qualified name
-        # Build expected substring without f-strings
-        expected_sub = __name__ + '.TestRepr.test_no_repr.<locals>.C object at'
-        self.assertIn(expected_sub, repr(C(3)))
+        self.assertIn('TestRepr.test_no_repr.<locals>.C object at', repr(C(3)))
 
         # Test a class with a __repr__ and repr=False.
         @dataclass(repr=False)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 #import six
 #six.add_move(six.MovedAttribute("collections_abc", "collections", "collections.abc", "MutableMapping"))
+import json
+
 import sys
 import os
 
@@ -137,12 +139,18 @@ def get_tests_data(module_name):
 _prepare_module_name = lambda x: x.replace("_py27", "").replace("_py314", "")
 
 if __name__ == "__main__":
+    path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    sys.path.insert(0, path)
     total314, data314 = get_tests_data("test_Dataclasses_py314")
-
+    oew = json.loads(json.dumps(data314))
     sys.modules["unittest"] = sys.modules["unittest2"]
 
     total, data = get_tests_data("test_Dataclasses_py27")
-    f = diff_dicts(data314, data, lambda x: x.replace("_py27", "").replace("_py314", ""))
+    for k, item in data314.items():
+        print("\n",set(data[k]),"\n",set(data314[k]))
+    for k, item in data.items():
+        print("\n",set(data314[k]),"\n",set(data[k]))
+    f = diff_dicts(oew, data, lambda x: x.replace("_py27", "").replace("_py314", ""))
     render_test_diff(f, ["extra", "missing"])
     pass
 

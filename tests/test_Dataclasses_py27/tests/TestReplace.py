@@ -1,10 +1,11 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestReplace(unittest.TestCase):
     def test(self):
         @dataclass(frozen=True)
         class C(object):
-            #__annotations__ = {'x': int, 'y': int}
             x = field(int)
             y = field(int)
 
@@ -16,11 +17,10 @@ class TestReplace(unittest.TestCase):
     def test_frozen(self):
         @dataclass(frozen=True)
         class C(object):
-            #__annotations__ = {'x': int, 'y': int, 'z': int, 't': int}
-            x = field(_typ=int)
-            y = field(_typ=int)
-            z = field(_typ=int, init=False, default=10)
-            t = field(_typ=int, init=False, default=100)
+            x = field(int)
+            y = field(int)
+            z = field(int, init=False, default=10)
+            t = field(int, init=False, default=100)
 
         c = C(1, 2)
         c1 = replace(c, x=3)
@@ -48,19 +48,17 @@ class TestReplace(unittest.TestCase):
     def test_invalid_field_name(self):
         @dataclass(frozen=True)
         class C(object):
-            #__annotations__ = {'x': int, 'y': int}
             x = field(int)
             y = field(int)
 
         c = C(1, 2)
         with self.assertRaisesRegexp(TypeError, r"__init__\(\) got an unexpected "
-                                                "keyword argument 'z'"):
+                                               "keyword argument 'z'"):
             c1 = replace(c, z=3)
 
     def test_invalid_object(self):
         @dataclass(frozen=True)
         class C(object):
-            #__annotations__ = {'x': int, 'y': int}
             x = field(int)
             y = field(int)
 
@@ -73,7 +71,6 @@ class TestReplace(unittest.TestCase):
     def test_no_init(self):
         @dataclass
         class C(object):
-            #__annotations__ = {'x': int, 'y': int}
             x = field(int)
             y = field(int, init=False, default=10)
 
@@ -92,11 +89,10 @@ class TestReplace(unittest.TestCase):
             replace(c, y=30)
 
     def test_classvar(self):
-        from typing import ClassVar
         @dataclass
         class C(object):
             x = field(int)
-            y = field(ClassVar[int], 1000)
+            y = field(ClassVar[int], default=1000)
 
         c = C(1)
         d = C(2)
@@ -105,37 +101,35 @@ class TestReplace(unittest.TestCase):
         self.assertEqual(c.y, 1000)
 
         # Trying to replace y is an error: can't replace ClassVars.
-        with self.assertRaisesRegexp(TypeError,
-                                     "__init__\(\) got an unexpected keyword argument 'y'"):
+        with self.assertRaisesRegexp(TypeError, r"__init__\(\) got an "
+                                               "unexpected keyword argument 'y'"):
             replace(c, y=30)
 
         replace(c, x=5)
 
     def test_initvar_is_specified(self):
-
         @dataclass
         class C(object):
             x = field(int)
-            y = field(InitVar(int))
+            y = field(InitVar[int])
 
             def __post_init__(self, y):
                 self.x *= y
 
         c = C(1, 10)
         self.assertEqual(c.x, 10)
-        with self.assertRaisesRegexp(TypeError,
-                                     r"InitVar 'y' must be specified with replace\(\)"):
+        with self.assertRaisesRegexp(TypeError, r"InitVar 'y' must be "
+                                               r"specified with replace\(\)"):
             replace(c, x=3)
         c = replace(c, x=3, y=5)
         self.assertEqual(c.x, 15)
 
     def test_initvar_with_default_value(self):
-
         @dataclass
         class C(object):
             x = field(int)
-            y = field(InitVar(int), None)
-            z = field(InitVar(int), 42)
+            y = field(InitVar[int], default=None)
+            z = field(InitVar[int], default=42)
 
             def __post_init__(self, y, z):
                 if y is not None:
@@ -151,7 +145,7 @@ class TestReplace(unittest.TestCase):
     def test_recursive_repr(self):
         @dataclass
         class C(object):
-            f = field(object)
+            f = field('C')
 
         c = C(None)
         c.f = c
@@ -160,8 +154,8 @@ class TestReplace(unittest.TestCase):
     def test_recursive_repr_two_attrs(self):
         @dataclass
         class C(object):
-            f = field(object)
-            g = field(object)
+            f = field('C')
+            g = field('C')
 
         c = C(None, None)
         c.f = c
@@ -172,11 +166,11 @@ class TestReplace(unittest.TestCase):
     def test_recursive_repr_indirection(self):
         @dataclass
         class C(object):
-            f = field(object)
+            f = field('D')
 
         @dataclass
         class D(object):
-            f = field(object)
+            f = field('C')
 
         c = C(None)
         d = D(None)
@@ -189,15 +183,15 @@ class TestReplace(unittest.TestCase):
     def test_recursive_repr_indirection_two(self):
         @dataclass
         class C(object):
-            f = field(object)
+            f = field('D')
 
         @dataclass
         class D(object):
-            f = field(object)
+            f = field('E')
 
         @dataclass
         class E(object):
-            f = field(object)
+            f = field('C')
 
         c = C(None)
         d = D(None)
@@ -213,10 +207,11 @@ class TestReplace(unittest.TestCase):
     def test_recursive_repr_misc_attrs(self):
         @dataclass
         class C(object):
-            f = field(object)
+            f = field('C')
             g = field(int)
 
         c = C(None, 1)
         c.f = c
         self.assertEqual(repr(c), "TestReplace.test_recursive_repr_misc_attrs"
                                   ".<locals>.C(f=..., g=1)")
+

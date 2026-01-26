@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestEq(unittest.TestCase):

@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestDocString(unittest.TestCase):
@@ -58,22 +60,21 @@ class TestDocString(unittest.TestCase):
         class C(object):
             x = field(type(None), default=None)
 
-        # In CPython 3.14 this renders as "None"; our py27 port should mirror text
-        self.assertDocStrEqual(C.__doc__, "C(x:None=None)")
+        self.assertDocStrEqual(C.__doc__, "C(x:int|None=None)")
 
     def test_docstring_list_field(self):
         @dataclass
         class C(object):
             x = field(list)
 
-        self.assertDocStrEqual(C.__doc__, "C(x:list)")
+        self.assertDocStrEqual(C.__doc__, "C(x:List[int])")
 
     def test_docstring_list_field_with_default_factory(self):
         @dataclass
         class C(object):
             x = field(list, default_factory=list)
 
-        self.assertDocStrEqual(C.__doc__, "C(x:list=<factory>)")
+        self.assertDocStrEqual(C.__doc__, "C(x:List[int]=<factory>)")
 
     def test_docstring_deque_field(self):
         from collections import deque
@@ -81,7 +82,6 @@ class TestDocString(unittest.TestCase):
         class C(object):
             x = field(deque)
 
-        # Fully-qualified name expected
         self.assertDocStrEqual(C.__doc__, "C(x:collections.deque)")
 
     def test_docstring_deque_field_with_default_factory(self):
@@ -100,33 +100,22 @@ class TestDocString(unittest.TestCase):
         self.assertDocStrEqual(C.__doc__, "C(x:undef)")
 
     def test_docstring_with_unsolvable_forward_ref_in_init(self):
-        # Adapted from the CPython 3.14 test: use exec to define a class
-        # with forward refs in __init__ signature. Py27 translation keeps
-        # the spirit and may fail on this backport, which is acceptable.
         import textwrap
         ns = {}
-        code = textwrap.dedent(
-            """
-            from py2dataclasses.dataclasses import dataclass
+        exec(textwrap.dedent("""
+from py2dataclasses.dataclasses import dataclass
 
-            @dataclass
-            class C(object):
-                def __init__(self, x, num):
-                    # Original used annotated signature (x: X, num: int) -> None
-                    pass
-            """
-        )
-        exec(code, ns)
-        C = ns['C']
-        # Match CPython 3.14 expected rendering
-        self.assertDocStrEqual(C.__doc__, "C(x:X,num:int)")
+@dataclass
+class C(object):
+    def __init__(self, x, num):
+        pass
+"""), ns)
+
+        self.assertDocStrEqual(ns['C'].__doc__, "C(x:X,num:int)")
 
     def test_docstring_with_no_signature(self):
-        # Ported to py27 style meta-class declaration
         class Meta(type):
-            def __call__(cls, *args, **kwargs):
-                return dict(*args, **kwargs)
-
+            __call__ = dict
         class Base(object):
             __metaclass__ = Meta
             pass

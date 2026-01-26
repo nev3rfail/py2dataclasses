@@ -1,8 +1,28 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestKeywordArgs(unittest.TestCase):
+    def test_no_classvar_kwarg(self):
+        msg = 'field a is a ClassVar but specifies kw_only'
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(ClassVar[int], kw_only=True)
+
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(ClassVar[int], kw_only=False)
+
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass(kw_only=True)
+            class A(object):
+                a = field(ClassVar[int], kw_only=False)
+
     def test_field_marked_as_kwonly(self):
-        # Test kw_only flag on fields
+        #######################
+        # Using dataclass(kw_only=True)
         @dataclass(kw_only=True)
         class A(object):
             a = field(int)
@@ -18,6 +38,7 @@ class TestKeywordArgs(unittest.TestCase):
             a = field(int, kw_only=False)
         self.assertFalse(fields(A)[0].kw_only)
 
+        #######################
         # Using dataclass(kw_only=False)
         @dataclass(kw_only=False)
         class A(object):
@@ -34,6 +55,7 @@ class TestKeywordArgs(unittest.TestCase):
             a = field(int, kw_only=False)
         self.assertFalse(fields(A)[0].kw_only)
 
+        #######################
         # Not specifying dataclass(kw_only)
         @dataclass
         class A(object):
@@ -63,131 +85,190 @@ class TestKeywordArgs(unittest.TestCase):
             b = field(int, kw_only=True)
         self.assertEqual(C(42, b=10).__match_args__, ('a',))
 
-    def test_no_classvar_kwarg(self):
-        from typing import ClassVar
-        msg = 'field a is a ClassVar but specifies kw_only'
-        with self.assertRaisesRegexp(TypeError, msg):
-            @dataclass
-            class A(object):
-                a = field(ClassVar[int], kw_only=True)
-
-        with self.assertRaisesRegexp(TypeError, msg):
-            @dataclass
-            class A(object):
-                a = field(ClassVar[int], kw_only=False)
-
-        with self.assertRaisesRegexp(TypeError, msg):
-            @dataclass(kw_only=True)
-            class A(object):
-                a = field(ClassVar[int], kw_only=False)
-
     def test_KW_ONLY(self):
-        # Python 2 doesn't support KW_ONLY sentinel field syntax
-        # but we can still test kw_only functionality using field(kw_only=True)
         @dataclass
         class A(object):
             a = field(int)
-            b = field(int, kw_only=True)
-            c = field(int, kw_only=True)
-
-        # Should be able to create with positional a and keyword-only b, c
-        a_inst = A(3, c=5, b=4)
-        self.assertEqual(a_inst.a, 3)
-        self.assertEqual(a_inst.b, 4)
-        self.assertEqual(a_inst.c, 5)
+            _  = KW_ONLY
+            b = field(int)
+            c = field(int)
+        A(3, c=5, b=4)
+        msg = "takes 2 positional arguments but 4 were given"
+        with self.assertRaisesRegexp(TypeError, msg):
+            A(3, 4, 5)
 
         @dataclass(kw_only=True)
         class B(object):
             a = field(int)
+            _  = KW_ONLY
             b = field(int)
             c = field(int)
+        B(a=3, b=4, c=5)
+        msg = "takes 1 positional argument but 4 were given"
+        with self.assertRaisesRegexp(TypeError, msg):
+            B(3, 4, 5)
 
-        # All fields are keyword-only
-        b_inst = B(a=3, b=4, c=5)
-        self.assertEqual(b_inst.a, 3)
-        self.assertEqual(b_inst.b, 4)
-        self.assertEqual(b_inst.c, 5)
-
+        # Explicitly make a field that follows KW_ONLY be non-keyword-only.
         @dataclass
         class C(object):
             a = field(int)
-            b = field(int, kw_only=True)
+            _ = KW_ONLY
+            b = field(int)
             c = field(int, kw_only=False)
-
-        # a is positional, b is kw-only, c is positional
-        c_inst = C(1, 2, b=3)
-        self.assertEqual(c_inst.a, 1)
-        self.assertEqual(c_inst.b, 3)
-        self.assertEqual(c_inst.c, 2)
-
-        c_inst = C(1, b=3, c=2)
-        self.assertEqual(c_inst.a, 1)
-        self.assertEqual(c_inst.b, 3)
-        self.assertEqual(c_inst.c, 2)
+        c = C(1, 2, b=3)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, 3)
+        self.assertEqual(c.c, 2)
+        c = C(1, b=3, c=2)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, 3)
+        self.assertEqual(c.c, 2)
+        c = C(1, b=3, c=2)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, 3)
+        self.assertEqual(c.c, 2)
+        c = C(c=2, b=3, a=1)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, 3)
+        self.assertEqual(c.c, 2)
 
     def test_KW_ONLY_as_string(self):
-        # Python 2 doesn't support KW_ONLY sentinel field or string annotations for it
-        # Test that kw_only works as a field parameter
         @dataclass
         class A(object):
             a = field(int)
-            b = field(int, kw_only=True)
+            _ = field('dataclasses.KW_ONLY')
+            b = field(int)
             c = field(int)
-
-        # Verify kw_only is set correctly
-        fs = fields(A)
-        self.assertFalse(fs[0].kw_only)  # a
-        self.assertTrue(fs[1].kw_only)   # b
-        self.assertFalse(fs[2].kw_only)  # c
+        A(3, c=5, b=4)
+        msg = "takes 2 positional arguments but 4 were given"
+        with self.assertRaisesRegexp(TypeError, msg):
+            A(3, 4, 5)
 
     def test_KW_ONLY_twice(self):
+        msg = "'Y' is KW_ONLY, but KW_ONLY has already been specified"
 
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(int)
+                X = KW_ONLY
+                Y = KW_ONLY
+                b = field(int)
+                c = field(int)
+
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(int)
+                X = KW_ONLY
+                b = field(int)
+                Y = KW_ONLY
+                c = field(int)
+
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(int)
+                X = KW_ONLY
+                b = field(int)
+                c = field(int)
+                Y = KW_ONLY
+
+        # But this usage is okay, since it's not using KW_ONLY.
         @dataclass
-        class A(object):
-            a = field(int, kw_only=True)
-            b = field(int, kw_only=False)  # Conflicting specification
+        class NoDuplicateKwOnlyAnnotation(object):
+            a = field(int)
+            _ = KW_ONLY
+            b = field(int)
+            c = field(int, kw_only=True)
 
-        # Just verify the class was created with mixed kw_only settings
-        fs = fields(A)
-        self.assertTrue(fs[0].kw_only)
-        self.assertFalse(fs[1].kw_only)
+        # And if inheriting, it's okay.
+        @dataclass
+        class BaseUsesKwOnly(object):
+            a = field(int)
+            _ = KW_ONLY
+            b = field(int)
+            c = field(int)
+        @dataclass
+        class SubclassUsesKwOnly(BaseUsesKwOnly):
+            _ = KW_ONLY
+            d = field(int)
 
+        # Make sure the error is raised in a derived class.
+        with self.assertRaisesRegexp(TypeError, msg):
+            @dataclass
+            class A(object):
+                a = field(int)
+                _ = KW_ONLY
+                b = field(int)
+                c = field(int)
+            @dataclass
+            class B(A):
+                X = KW_ONLY
+                d = field(int)
+                Y = KW_ONLY
 
     def test_post_init(self):
         @dataclass
         class A(object):
             a = field(int)
-            b = field(InitVar(int), kw_only=True)
-            c = field(int, kw_only=True)
-            d = field(InitVar(int), kw_only=True)
-
+            _ = KW_ONLY
+            b = field(InitVar[int])
+            c = field(int)
+            d = field(InitVar[int])
             def __post_init__(self, b, d):
-                # Modify a based on b and d
-                self.a = self.a + b + d
+                raise CustomError('b={} d={}'.format(b, d))
+        with self.assertRaisesRegexp(CustomError, 'b=3 d=4'):
+            A(1, c=2, b=3, d=4)
 
-
-        a_inst = A(1, b=3, c=2, d=4)
-        self.assertEqual(a_inst.a, 1 + 3 + 4)
-        self.assertEqual(a_inst.c, 2)
+        @dataclass
+        class B(object):
+            a = field(int)
+            _ = KW_ONLY
+            b = field(InitVar[int])
+            c = field(int)
+            d = field(InitVar[int])
+            def __post_init__(self, b, d):
+                self.a = b
+                self.c = d
+        b = B(1, c=2, b=3, d=4)
+        self.assertEqual(asdict(b), {'a': 3, 'c': 4})
 
     def test_defaults(self):
         # For kwargs, make sure we can have defaults after non-defaults.
         @dataclass
         class A(object):
-            a = field(int, default=0, kw_only=True)
-            b = field(int, kw_only=True)
-            c = field(int, default=1, kw_only=True)
-            d = field(int, kw_only=True)
+            a = field(int, default=0)
+            _ = KW_ONLY
+            b = field(int)
+            c = field(int, default=1)
+            d = field(int)
 
-        # Python 2 doesn't support keyword-only args in __init__, so we just verify the fields exist
-        self.assertEqual(len(fields(A)), 4)
+        a = A(d=4, b=3)
+        self.assertEqual(a.a, 0)
+        self.assertEqual(a.b, 3)
+        self.assertEqual(a.c, 1)
+        self.assertEqual(a.d, 4)
+
+        # Make sure we still check for non-kwarg non-defaults not following
+        # defaults.
+        err_regex = "non-default argument 'z' follows default argument 'a'"
+        with self.assertRaisesRegexp(TypeError, err_regex):
+            @dataclass
+            class A(object):
+                a = field(int, default=0)
+                z = field(int)
+                _ = KW_ONLY
+                b = field(int)
+                c = field(int, default=1)
+                d = field(int)
 
     def test_make_dataclass(self):
-        A = make_dataclass('A', ['a'], kw_only=True)
+        A = make_dataclass("A", [('a', int)], kw_only=True)
         self.assertTrue(fields(A)[0].kw_only)
 
-        B = make_dataclass('B',
-                           ['a', ('b', int, field(int, kw_only=False))],
+        B = make_dataclass("B",
+                           [('a', int), ('b', int, field(kw_only=False))],
                            kw_only=True)
         self.assertTrue(fields(B)[0].kw_only)
         self.assertFalse(fields(B)[1].kw_only)
@@ -195,9 +276,10 @@ class TestKeywordArgs(unittest.TestCase):
     def test_deferred_annotations(self):
         @dataclass
         class A(object):
-            x = field(object)
+            x = field('undefined')
+            y = field(ClassVar['undefined'])
 
-        # Just verify the field is created
         fs = fields(A)
         self.assertEqual(len(fs), 1)
         self.assertEqual(fs[0].name, 'x')
+

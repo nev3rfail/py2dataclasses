@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestDescriptors(unittest.TestCase):
@@ -121,7 +123,7 @@ class TestDescriptors(unittest.TestCase):
 
         # Make sure D.__set__ is called.
         D.set_called = False
-        c.i = D()
+        c.i = 10
         self.assertTrue(D.set_called)
 
     def test_setting_uninitialized_descriptor_field(self):
@@ -150,23 +152,19 @@ class TestDescriptors(unittest.TestCase):
             def __get__(self, instance, owner):
                 if instance is None:
                     return 100
-
                 return instance._x
 
             def __set__(self, instance, value):
-                #f = sys._getframe(0)
-                #f1 = sys._getframe(1)
                 instance._x = value
 
         @dataclass
         class C(object):
-            i = field(D, D(), mode=1)
+            i = field(D, default=D())
 
         c = C()
         self.assertEqual(c.i, 100)
 
         c = C(5)
-        # The descriptor's __get__ will be called
         self.assertEqual(c.i, 5)
 
     def test_no_default_value(self):
@@ -183,5 +181,6 @@ class TestDescriptors(unittest.TestCase):
         class C(object):
             i = field(D, default=D())
 
-        with self.assertRaisesRegexp(TypeError, '__init__\(\) takes exactly 2 arguments \(1 given\)'):
+        with self.assertRaisesRegexp(TypeError, 'missing 1 required positional argument'):
             c = C()
+

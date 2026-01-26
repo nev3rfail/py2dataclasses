@@ -106,6 +106,6 @@ if __name__ == '__main__':
     root_suite = loader.loadTestsFromName("tests.test_Dataclasses_py27")
     patch_test(sys.modules["test_Dataclasses_py27"])
     runner = unittest.TextTestRunner(verbosity=2)
-
+    runner.run(root_suite)
 #test_running()
 #return pew

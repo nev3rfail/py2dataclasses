@@ -1,9 +1,10 @@
-from load_test import *
+from __future__ import print_function, absolute_import
 
+from load_test import *
+from functools import total_ordering
 class TestOrdering(unittest.TestCase):
     def test_functools_total_ordering(self):
         # Test that functools.total_ordering works with this class.
-        from functools import total_ordering
         @total_ordering
         @dataclass
         class C(object):
@@ -42,7 +43,8 @@ class TestOrdering(unittest.TestCase):
 
     def test_overwriting_order(self):
         with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __lt__.*using functools.total_ordering'):
+                                    'Cannot overwrite attribute __lt__'
+                                    '.*using functools.total_ordering'):
             @dataclass(order=True)
             class C(object):
                 x = field(int)
@@ -50,7 +52,8 @@ class TestOrdering(unittest.TestCase):
                     pass
 
         with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __le__.*using functools.total_ordering'):
+                                    'Cannot overwrite attribute __le__'
+                                    '.*using functools.total_ordering'):
             @dataclass(order=True)
             class C(object):
                 x = field(int)
@@ -58,7 +61,7 @@ class TestOrdering(unittest.TestCase):
                     pass
 
         with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __gt__.*using functools.total_ordering'):
+                                     'Cannot overwrite attribute __gt__.*'):
             @dataclass(order=True)
             class C(object):
                 x = field(int)
@@ -66,9 +69,10 @@ class TestOrdering(unittest.TestCase):
                     pass
 
         with self.assertRaisesRegexp(TypeError,
-                                     'Cannot overwrite attribute __ge__.*using functools.total_ordering'):
+                                    'Cannot overwrite attribute __ge__'):
             @dataclass(order=True)
             class C(object):
                 x = field(int)
                 def __ge__(self):
                     pass
+

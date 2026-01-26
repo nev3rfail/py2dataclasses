@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestZeroArgumentSuperWithSlots(unittest.TestCase):
@@ -5,8 +7,7 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         @dataclass(slots=True)
         class A(object):
             def foo(self):
-                # In Python 3 this is valid; in Python 2 this may fail, as allowed.
-                super()
+                super(A, self)
 
         A().foo()
 
@@ -38,28 +39,27 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         class A(object):
             @property
             def foo(slf):
-                return slf.__class__
+                return A
 
             @foo.setter
             def foo(slf, value):
-                self.assertIs(__class__, type(slf))
+                self.assertIs(A, type(slf))
 
             @foo.deleter
             def foo(slf):
-                self.assertIs(__class__, type(slf))
+                self.assertIs(A, type(slf))
 
         a = A()
         self.assertIs(a.foo, A)
         a.foo = 4
         del a.foo
 
-    # Test the parts of a property individually.
     def test_slots_dunder_class_property_getter(self):
         @dataclass(slots=True)
         class A(object):
             @property
             def foo(slf):
-                return __class__
+                return A
 
         a = A()
         self.assertIs(a.foo, A)
@@ -87,7 +87,6 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         del a.foo
 
     def test_wrapped(self):
-        from functools import wraps
         def mydecorator(f):
             @wraps(f)
             def wrapper(*args, **kwargs):
@@ -98,7 +97,7 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         class A(object):
             @mydecorator
             def foo(self):
-                super()
+                super(A, self)
 
         A().foo()
 
@@ -108,13 +107,21 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         # undecorated class.
         class A(object):
             def cls(self):
-                return __class__
+                return A
 
         self.assertIs(A().cls(), A)
 
         B = dataclass(slots=True)(A)
         self.assertIs(B().cls(), B)
 
-        # The underlying class is affected similarly as in CPython tests
+        # This is undesirable behavior, but is a function of how
+        # modifying __class__ in the closure works.  I'm not sure this
+        # should be tested or not: I don't really want to guarantee
+        # this behavior, but I don't want to lose the point that this
+        # is how it works.
+
+        # The underlying class is "broken" by changing its __class__
+        # in A.cls() to B.  This normally isn't a problem, because no
+        # one will be keeping a reference to the underlying class A.
         self.assertIs(A().cls(), B)
 

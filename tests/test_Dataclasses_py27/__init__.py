@@ -5,8 +5,12 @@ from load_test import *
 
 
 def load_tests(loader, tests, pattern):
-    mod = __import__("tests.test_Dataclasses_py27.tests")
-    suite = loader.loadTestsFromModule(mod.test_Dataclasses_py27.tests)#loader.loadTestsFromName("tests.test_Dataclasses_py27.tests")
+    try:
+        mod = __import__("tests.test_Dataclasses_py27.tests")
+        suite = loader.loadTestsFromModule(mod.test_Dataclasses_py27.tests)#loader.loadTestsFromName("tests.test_Dataclasses_py27.tests")
+    except:
+        mod = __import__("test_Dataclasses_py27.tests")
+        suite = loader.loadTestsFromModule(mod.tests)
     return suite
 
 

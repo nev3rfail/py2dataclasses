@@ -1,3 +1,5 @@
+from __future__ import print_function, absolute_import
+
 from load_test import *
 
 class TestInit(unittest.TestCase):
@@ -63,11 +65,26 @@ class TestInit(unittest.TestCase):
             def __init__(self, x):
                 self.x = 2 * x
         self.assertEqual(C(5).x, 10)
+
     def test_inherit_from_protocol(self):
-        # Dataclasses inheriting from protocol should preserve their own __init__.
-        # Protocol is tricky in Python 2, so we'll just test basic inheritance
+        # Dataclasses inheriting from protocol should preserve their own `__init__`.
+        # See bpo-45081.
+        # Protocol is a typing construct that may not be fully available in py27,
+        # so we'll test the basic pattern
+
+        class P(object):
+            a = field(int, init=False)
+
         @dataclass
-        class C(object):
+        class C(P):
             a = field(int)
 
         self.assertEqual(C(5).a, 5)
+
+        @dataclass
+        class D(P):
+            def __init__(self, a):
+                self.a = a * 2
+
+        self.assertEqual(D(5).a, 10)
+

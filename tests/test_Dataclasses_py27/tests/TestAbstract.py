@@ -1,12 +1,15 @@
+from __future__ import print_function, absolute_import
+
+import abc
+
+import six
+
 from load_test import *
+
 
 class TestAbstract(unittest.TestCase):
     def test_abc_implementation(self):
-        #
-        import inspect
-
-        class Ordered(object):
-            __metaclass__ = abc.ABCMeta
+        class Ordered(ABC):
             @abc.abstractmethod
             def __lt__(self, other):
                 pass
@@ -17,7 +20,6 @@ class TestAbstract(unittest.TestCase):
 
         @dataclass(order=True)
         class Date(Ordered):
-            """yay doc"""
             year = field(int)
             month = field(str)
             day = field(int)
@@ -26,14 +28,15 @@ class TestAbstract(unittest.TestCase):
         self.assertGreater(Date(2020, 12, 25), Date(2020, 8, 31))
 
     def test_maintain_abc(self):
-
-        import inspect
-
         class A(ABC):
             @abc.abstractmethod
             def foo(self):
                 pass
+        class Date2(object):
 
+            year = field(int)
+            month = field(str)
+            day = field(int)
         @dataclass
         class Date(A):
             year = field(int)
@@ -41,5 +44,8 @@ class TestAbstract(unittest.TestCase):
             day = field(int)
 
         self.assertTrue(inspect.isabstract(Date))
-        msg = "Can't instantiate abstract class Date with abstract methods foo"
+        if six.PY3:
+            msg = "class Date without an implementation for abstract method 'foo'"
+        elif six.PY2:
+            msg = "Can't instantiate abstract class Date with abstract methods foo"
         self.assertRaisesRegexp(TypeError, msg, Date)

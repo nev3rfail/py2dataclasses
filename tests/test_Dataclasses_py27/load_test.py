@@ -2,9 +2,13 @@
 from __future__ import print_function, absolute_import
 import os
 import sys
+
+import six
+
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.insert(0, path)
-
+from functools import wraps
+import inspect
 try:
     from collections import MutableMapping
 except:
@@ -13,7 +17,7 @@ except:
     from collections.abc import MutableMapping
     object.__setattr__(collections, "MutableMapping", MutableMapping)
 
-import abc
+
 import funcsigs
 
 from collections import OrderedDict
@@ -38,7 +42,11 @@ def expose_to_test(*classes):
 
 
 
-
+def _2_or_3(for_2, for_3):
+    if six.PY2:
+        return for_2
+    elif six.PY3:
+        return for_3
 
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".."))
@@ -46,6 +54,7 @@ sys.path.append(path)
 from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import py2dataclasses.dataclasses as dataclasses
+from py2dataclasses import ABC
 sys.modules["dataclasses"] = dataclasses
 import unittest2 as unittest
 # Try to expose typing.get_type_hints for tests that expect it; if unavailable
@@ -63,5 +72,3 @@ import types
 import weakref
 # Just any custom exception we can catch.
 class CustomError(Exception): pass
-class ABC(object):
-    __metaclass__ = abc.ABCMeta
