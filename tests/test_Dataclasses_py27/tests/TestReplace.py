@@ -37,6 +37,14 @@ class TestReplace(unittest.TestCase):
         with self.assertRaisesRegexp(FrozenInstanceError, "cannot assign to field 'x'"):
             c1.x = 3
 
+        # Make sure we can't replace an attribute that doesn't exist,
+        #  if we're also replacing one that does exist.  Test this
+        #  here, because setting attributes on frozen instances is
+        #  handled slightly differently from non-frozen ones.
+        with self.assertRaisesRegexp(TypeError, r"__init__\(\) got an unexpected "
+                                               "keyword argument 'a'"):
+            c1 = replace(c, x=20, a=5)
+
     def test_invalid_field_name(self):
         @dataclass(frozen=True)
         class C(object):
