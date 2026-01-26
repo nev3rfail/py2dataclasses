@@ -48,7 +48,7 @@ def _2_or_3(for_2, for_3):
     elif six.PY3:
         return for_3
 
-
+from typing import ClassVar
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".."))
 sys.path.append(path)
 from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \

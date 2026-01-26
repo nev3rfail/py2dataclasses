@@ -24,7 +24,7 @@ from copy import deepcopy
 from functools import total_ordering, wraps
 
 import typing       # Needed for the string "typing.ClassVar[int]" to work as an annotation.
-import dataclasses  # Needed for the string "dataclasses.InitVar[int]" to work as an annotation.
+import py2dataclasses.dataclasses as dataclasses  # Needed for the string "dataclasses.InitVar[int]" to work as an annotation.
 
 from test import support
 from test.support import import_helper

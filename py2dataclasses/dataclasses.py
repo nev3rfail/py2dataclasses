@@ -426,6 +426,20 @@ class _FuncBuilder(object):
         for name, fn in zip(self.names, fns):
             fn.__qualname__ = '{0}.{1}'.format(cls.__name__, fn.__name__)
 
+            # Apply method annotations if they were stored
+            if name in self.method_annotations:
+                annotation_fields, return_type = self.method_annotations[name]
+                annotations = OrderedDict()
+                # Get the field types from the class annotations
+                cls_annotations = getattr(cls, '__annotations__', {})
+                for field_name in annotation_fields:
+                    if field_name in cls_annotations:
+                        annotations[field_name] = cls_annotations[field_name]
+                if return_type is not None:
+                    annotations['return'] = return_type
+                if annotations:
+                    fn.__annotations__ = annotations
+
             if self.unconditional_adds.get(name, False):
                 setattr(cls, name, fn)
             else:
@@ -556,7 +570,7 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
                         [self_name] + _init_params,
                         body_lines,
                         locals=locals,
-                        return_type=None,
+                        return_type=type(None),
                         annotation_fields=annotation_fields)
 
 

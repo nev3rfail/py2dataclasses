@@ -15,17 +15,17 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         @dataclass(slots=True)
         class A(object):
             def _get_foo(slf):
-                self.assertIs(__class__, type(slf))
-                self.assertIs(__class__, slf.__class__)
-                return __class__
+                self.assertIs(A, type(slf))
+                self.assertIs(A, slf.__class__)
+                return A
 
             def _set_foo(slf, value):
-                self.assertIs(__class__, type(slf))
-                self.assertIs(__class__, slf.__class__)
+                self.assertIs(A, type(slf))
+                self.assertIs(A, slf.__class__)
 
             def _del_foo(slf):
-                self.assertIs(__class__, type(slf))
-                self.assertIs(__class__, slf.__class__)
+                self.assertIs(A, type(slf))
+                self.assertIs(A, slf.__class__)
 
             foo = property(_get_foo, _set_foo, _del_foo)
 

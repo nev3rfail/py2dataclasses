@@ -73,7 +73,12 @@ def patch_mod(target_module):
 
 
 def patch_test(target_module):
-    field_list = ('fields', 'field', 'Field', 'dataclass', 'is_dataclass', 'replace', 'make_dataclass', 'asdict', 'astuple', 'FrozenInstanceError', 'MISSING', '_oneshot')
+    field_list = ('fields', 'field', 'Field',
+                  'dataclass', 'is_dataclass',
+                  'replace', 'make_dataclass',
+                  'asdict', 'astuple',
+                  'FrozenInstanceError',
+                  'MISSING', '_oneshot', 'KW_ONLY')
     patch_map = {"field": field_adapter, "dataclass": dataclass_adapter}
     for one in field_list:
 
