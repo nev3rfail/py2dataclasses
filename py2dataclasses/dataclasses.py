@@ -900,14 +900,16 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     if repr:
         flds = [f for f in field_list if f.repr]
-        repr_fmt = ', '.join(['{0}={{{1}!r}}'.format(f.name, flds.index(f)) for f in flds])
 
-        #if flds:
-        body = ['  return "{0}({1})".format({2})'.format(
-            cls.__name__,
-            repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
-            ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
-        ).replace(".format()", "")]
+        if flds:
+            args_str = ', '.join(['self.{0}'.format(f.name) for f in flds])
+            # Build format string: {0}(x={1!r}, y={2!r})
+            field_formats = ', '.join(['{0}={{{1}!r}}'.format(f.name, i+1) for i, f in enumerate(flds)])
+            body = ['  cls_name = self.__class__.__qualname__ if hasattr(self.__class__, "__qualname__") else self.__class__.__name__',
+                    '  return "{{0}}({0})".format(cls_name, {1})'.format(field_formats, args_str)]
+        else:
+            body = ['  cls_name = self.__class__.__qualname__ if hasattr(self.__class__, "__qualname__") else self.__class__.__name__',
+                    '  return "{0}()".format(cls_name)']
         if flds:
             decorator="@__dataclasses_recursive_repr()"
         else:
@@ -997,6 +999,18 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if match_args:
         _set_new_attribute(cls, '__match_args__',
                            tuple(f.name for f in std_init_fields))
+
+    # Auto-enable slots if inheriting directly from a non-dataclass with __slots__
+    # This prevents the child from inheriting the parent's __slots__ value
+    if not slots:
+        # Check only direct parent bases, not grandparents
+        for base in cls.__bases__:
+            base_params = getattr(base, _PARAMS, None)
+            if base_params is None and '__slots__' in base.__dict__:
+                # Direct base is not a dataclass but has slots, auto-create slots
+                # to avoid inheriting parent's __slots__
+                slots = True
+                break
 
     # It's an error to specify weakref_slot if slots is False.
     if weakref_slot and not slots:
