@@ -22,10 +22,10 @@ class TestFrozen(unittest.TestCase):
             pass
 
         c = C()
-        self.assertNotHasAttr(c, 'i')
+        self.assertFalse(hasattr(c, 'i'))
         with self.assertRaises(FrozenInstanceError):
             c.i = 5
-        self.assertNotHasAttr(c, 'i')
+        self.assertFalse(hasattr(c, 'i'))
         with self.assertRaises(FrozenInstanceError):
             del c.i
 
@@ -255,7 +255,7 @@ class TestFrozen(unittest.TestCase):
             del s.y
         self.assertEqual(s.y, 10)
         del s.cached
-        self.assertNotHasAttr(s, 'cached')
+        self.assertFalse(hasattr(s, 'cached'))
         with self.assertRaises(AttributeError) as cm:
             del s.cached
         self.assertNotIsInstance(cm.exception, FrozenInstanceError)
@@ -269,12 +269,12 @@ class TestFrozen(unittest.TestCase):
             pass
 
         s = S()
-        self.assertNotHasAttr(s, 'x')
+        self.assertFalse(hasattr(s, 'x'))
         s.x = 5
         self.assertEqual(s.x, 5)
 
         del s.x
-        self.assertNotHasAttr(s, 'x')
+        self.assertFalse(hasattr(s, 'x'))
         with self.assertRaises(AttributeError) as cm:
             del s.x
         self.assertNotIsInstance(cm.exception, FrozenInstanceError)

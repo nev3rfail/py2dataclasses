@@ -105,10 +105,10 @@ class TestStringAnnotations(unittest.TestCase):
                 self.assertEqual(C(10).x, 10)
 
     def test_classvar_module_level_import(self):
-        from test_Dataclasses_py27 import dataclass_module_1
-        from test_Dataclasses_py27 import dataclass_module_1_str
-        from test_Dataclasses_py27 import dataclass_module_2
-        from test_Dataclasses_py27 import dataclass_module_2_str
+        from .. import dataclass_module_1
+        from .. import dataclass_module_1_str
+        from .. import dataclass_module_2
+        from .. import dataclass_module_2_str
 
         for m in (dataclass_module_1, dataclass_module_1_str,
                   dataclass_module_2, dataclass_module_2_str,
@@ -145,7 +145,7 @@ class TestStringAnnotations(unittest.TestCase):
                     self.assertNotIn('not_iv4', c.__dict__)
 
     def test_text_annotations(self):
-        from test_Dataclasses_py27 import dataclass_textanno
+        from .. import dataclass_textanno
 
         # In Python 2, get_type_hints may not work the same way
         # Just test that the module imports without error

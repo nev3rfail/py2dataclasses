@@ -1,7 +1,7 @@
 import os, sys
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "."))
 sys.path.insert(0, path)
-from load_test import *
+#from load_test import *
 
 
 def load_tests(loader, tests, pattern):

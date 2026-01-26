@@ -52,7 +52,7 @@ from typing import ClassVar
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".."))
 sys.path.append(path)
 from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
-    astuple, FrozenInstanceError, MISSING, InitVar
+    astuple, FrozenInstanceError, MISSING, InitVar, KW_ONLY
 import py2dataclasses.dataclasses as dataclasses
 from py2dataclasses import ABC
 sys.modules["dataclasses"] = dataclasses
