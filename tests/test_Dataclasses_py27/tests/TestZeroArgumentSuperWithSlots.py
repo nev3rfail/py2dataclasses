@@ -101,6 +101,7 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
 
         A().foo()
 
+    @unittest.skip("Python 2.7 doesn't support __class__ cell like Python 3 does")
     def test_remembered_class(self):
         # Apply the dataclass decorator manually (not when the class
         # is created), so that we can keep a reference to the

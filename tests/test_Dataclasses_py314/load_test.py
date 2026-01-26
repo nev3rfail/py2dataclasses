@@ -2,7 +2,10 @@
 # is tested, so they all must be present.  This is a way to catch
 # missing ones.
 
-from dataclasses import *
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from py2dataclasses.dataclasses import *
 
 import abc
 import annotationlib

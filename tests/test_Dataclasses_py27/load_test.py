@@ -69,6 +69,7 @@ except Exception:
 import pickle
 import copy
 import types
+import typing
 import weakref
 # Just any custom exception we can catch.
 class CustomError(Exception): pass

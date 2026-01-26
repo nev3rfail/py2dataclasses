@@ -149,7 +149,8 @@ class TestReplace(unittest.TestCase):
 
         c = C(None)
         c.f = c
-        self.assertEqual(repr(c), "TestReplace.test_recursive_repr.<locals>.C(f=...)")
+        # Python 2: check that repr contains the essential parts
+        self.assertIn('C(f=...)', repr(c))
 
     def test_recursive_repr_two_attrs(self):
         @dataclass
@@ -160,8 +161,8 @@ class TestReplace(unittest.TestCase):
         c = C(None, None)
         c.f = c
         c.g = c
-        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_two_attrs"
-                                  ".<locals>.C(f=..., g=...)")
+        # Python 2: check that repr contains the essential parts
+        self.assertIn('C(f=..., g=...)', repr(c))
 
     def test_recursive_repr_indirection(self):
         @dataclass
@@ -176,9 +177,10 @@ class TestReplace(unittest.TestCase):
         d = D(None)
         c.f = d
         d.f = c
-        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_indirection"
-                                  ".<locals>.C(f=TestReplace.test_recursive_repr_indirection"
-                                  ".<locals>.D(f=...))")
+        # Python 2: check that repr contains the essential parts
+        repr_str = repr(c)
+        self.assertIn('C(f=', repr_str)
+        self.assertIn('D(f=...)', repr_str)
 
     def test_recursive_repr_indirection_two(self):
         @dataclass
@@ -199,10 +201,11 @@ class TestReplace(unittest.TestCase):
         c.f = d
         d.f = e
         e.f = c
-        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_indirection_two"
-                                  ".<locals>.C(f=TestReplace.test_recursive_repr_indirection_two"
-                                  ".<locals>.D(f=TestReplace.test_recursive_repr_indirection_two"
-                                  ".<locals>.E(f=...)))")
+        # Python 2: check that repr contains the essential parts
+        repr_str = repr(c)
+        self.assertIn('C(f=', repr_str)
+        self.assertIn('D(f=', repr_str)
+        self.assertIn('E(f=...)', repr_str)
 
     def test_recursive_repr_misc_attrs(self):
         @dataclass
@@ -212,6 +215,6 @@ class TestReplace(unittest.TestCase):
 
         c = C(None, 1)
         c.f = c
-        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_misc_attrs"
-                                  ".<locals>.C(f=..., g=1)")
+        # Python 2: check that repr contains the essential parts
+        self.assertIn('C(f=..., g=1)', repr(c))
 

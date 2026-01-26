@@ -13,12 +13,13 @@ class TestRepr(unittest.TestCase):
             y = field(int, default=10)
 
         o = C(4)
-        self.assertEqual(repr(o), 'TestRepr.test_repr.<locals>.C(x=4, y=10)')
+        # Python 2 doesn't have __qualname__, so we check for the module-qualified name
+        self.assertIn('C(x=4, y=10)', repr(o))
 
         @dataclass
         class D(C):
             x = field(int, default=20)
-        self.assertEqual(repr(D()), 'TestRepr.test_repr.<locals>.D(x=20, y=10)')
+        self.assertIn('D(x=20, y=10)', repr(D()))
 
         @dataclass
         class C(object):
@@ -28,15 +29,17 @@ class TestRepr(unittest.TestCase):
             @dataclass
             class E(object):
                 pass
-        self.assertEqual(repr(C.D(0)), 'TestRepr.test_repr.<locals>.C.D(i=0)')
-        self.assertEqual(repr(C.E()), 'TestRepr.test_repr.<locals>.C.E()')
+        # Python 2 doesn't have __qualname__
+        self.assertIn('C.D(i=0)', repr(C.D(0)))
+        self.assertIn('C.E()', repr(C.E()))
 
     def test_no_repr(self):
         # Test a class with no __repr__ and repr=False.
         @dataclass(repr=False)
         class C(object):
             x = field(int)
-        self.assertIn('TestRepr.test_no_repr.<locals>.C object at', repr(C(3)))
+        # Python 2 doesn't have __qualname__, so we just check for 'object at'
+        self.assertIn('object at', repr(C(3)))
 
         # Test a class with a __repr__ and repr=False.
         @dataclass(repr=False)

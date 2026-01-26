@@ -1046,9 +1046,16 @@ def _get_slots(cls):
             yield slot
     elif isinstance(slots_val, str):
         yield slots_val
-    elif hasattr(slots_val, '__iter__') and not hasattr(slots_val, '__next__'):
-        for slot in slots_val:
-            yield slot
+    elif hasattr(slots_val, '__iter__'):
+        # Check if it's an iterator (has __next__ or next method)
+        # In Python 2, iterators have 'next' method; in Python 3, they have '__next__'
+        if hasattr(slots_val, '__next__') or hasattr(slots_val, 'next'):
+            raise TypeError("Slots of '{0}' cannot be determined".format(cls.__name__))
+        try:
+            for slot in slots_val:
+                yield slot
+        except TypeError:
+            raise TypeError("Slots of '{0}' cannot be determined".format(cls.__name__))
     else:
         raise TypeError("Slots of '{0}' cannot be determined".format(cls.__name__))
 
@@ -1130,7 +1137,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
             newcls.__setstate__ = _dataclass_setstate
 
     # Fix up any closures which reference __class__.
-    for member in newcls.__dict__.values():
+    # Check both the new class dict and the old class dict for methods that need updating
+    for member in list(newcls.__dict__.values()) + list(cls.__dict__.values()):
         # If this is a wrapped function, unwrap it.
         member = inspect.unwrap(member) if hasattr(inspect, 'unwrap') else member
 
@@ -1430,7 +1438,16 @@ def make_dataclass(
 
     # Update namespace
     namespace.update(defaults)
-    namespace['__annotations__'] = annotations
+
+    # Convert _ANY_MARKER to typing.Any in annotations
+    import typing
+    final_annotations = OrderedDict()
+    for name, tp in annotations.items():
+        if tp is _ANY_MARKER:
+            final_annotations[name] = typing.Any
+        else:
+            final_annotations[name] = tp
+    namespace['__annotations__'] = final_annotations
 
     # Create the class
     cls = type(cls_name, bases, namespace)
