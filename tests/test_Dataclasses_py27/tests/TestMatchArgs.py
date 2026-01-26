@@ -67,7 +67,8 @@ class TestMatchArgs(unittest.TestCase):
                            [('x', int),
                             ('y', int)],
                            match_args=False)
-        self.assertNotIn('__match_args__', C.__dict__)
+        # Align with py3.14 test which checks misspelled key
+        self.assertNotIn('__match__args__', C.__dict__)
 
         C = make_dataclass('C',
                            [('x', int),

@@ -29,6 +29,7 @@ class TestStringAnnotations(unittest.TestCase):
                 @dataclass
                 class C(object):
                     pass
+                # Mirror py3.14: use annotations as strings; let py27 impl interpret
                 C.__annotations__ = {'x': typestr}
 
                 # x is a ClassVar, so C() takes no args.
@@ -53,8 +54,9 @@ class TestStringAnnotations(unittest.TestCase):
             with self.subTest(typestr=typestr):
                 @dataclass
                 class C(object):
-                    x = field(typestr)
-                #C.__annotations__ = {'x': typestr}
+                    pass
+                # Align with py3.14: provide string annotation for instance field
+                C.__annotations__ = {'x': typestr}
 
                 # x is not a ClassVar, so C() takes one arg.
                 self.assertEqual(C(10).x, 10)
@@ -90,7 +92,9 @@ class TestStringAnnotations(unittest.TestCase):
             with self.subTest(typestr=typestr):
                 @dataclass
                 class C(object):
-                    x = field(typestr)
+                    pass
+                # Align with py3.14: annotate x with the given typestr
+                C.__annotations__ = {'x': typestr}
 
                 # x is an InitVar, so doesn't create a member.
                 with self.assertRaisesRegexp(AttributeError,
@@ -106,49 +110,46 @@ class TestStringAnnotations(unittest.TestCase):
             with self.subTest(typestr=typestr):
                 @dataclass
                 class C(object):
-                    x = field(typestr)
+                    pass
+                # Align with py3.14: provide annotation so x is a regular field
+                C.__annotations__ = {'x': typestr}
 
                 # x is not an InitVar, so there will be a member x.
                 self.assertEqual(C(10).x, 10)
 
     def test_classvar_module_level_import(self):
-        from .dataclass_module_1 import CV as CV_1, IV as IV_1, USING_STRINGS as USING_STRINGS_1
-        from .dataclass_module_1_str import CV as CV_1_str, IV as IV_1_str, USING_STRINGS as USING_STRINGS_1_str
-        from .dataclass_module_2 import CV as CV_2, IV as IV_2, USING_STRINGS as USING_STRINGS_2
-        from .dataclass_module_2_str import CV as CV_2_str, IV as IV_2_str, USING_STRINGS as USING_STRINGS_2_str
+        # Mirror py3.14 imports; if these modules are unavailable in py27 env,
+        # the test is still expected to try and may fail.
+        from test.test_dataclasses import dataclass_module_1
+        from test.test_dataclasses import dataclass_module_1_str
+        from test.test_dataclasses import dataclass_module_2
+        from test.test_dataclasses import dataclass_module_2_str
 
-        modules_and_flags = [
-            (CV_1, IV_1, USING_STRINGS_1),
-            (CV_1_str, IV_1_str, USING_STRINGS_1_str),
-            (CV_2, IV_2, USING_STRINGS_2),
-            (CV_2_str, IV_2_str, USING_STRINGS_2_str),
-        ]
-
-        for cv_class, iv_class, using_strings in modules_and_flags:
-            with self.subTest(cv_class=cv_class):
+        for m in (dataclass_module_1, dataclass_module_1_str,
+                  dataclass_module_2, dataclass_module_2_str):
+            with self.subTest(m=m):
                 # There's a difference in how the ClassVars are
                 # interpreted when using string annotations or
                 # not. See the imported modules for details.
-                if using_strings:
-                    c = cv_class(10)
+                if m.USING_STRINGS:
+                    c = m.CV(10)
                 else:
-                    c = cv_class()
+                    c = m.CV()
                 self.assertEqual(c.cv0, 20)
 
-            with self.subTest(iv_class=iv_class):
                 # There's a difference in how the InitVars are
                 # interpreted when using string annotations or
                 # not. See the imported modules for details.
-                c = iv_class(0, 1, 2, 3, 4)
+                c = m.IV(0, 1, 2, 3, 4)
 
                 for field_name in ('iv0', 'iv1', 'iv2', 'iv3'):
                     with self.subTest(field_name=field_name):
-                        with self.assertRaisesRegexp(AttributeError, "object has no attribute"):
+                        with self.assertRaisesRegexp(AttributeError, "object has no attribute '" + field_name + "'"):
                             # Since field_name is an InitVar, it's
                             # not an instance field.
                             getattr(c, field_name)
 
-                if using_strings:
+                if m.USING_STRINGS:
                     # iv4 is interpreted as a normal field.
                     self.assertIn('not_iv4', c.__dict__)
                     self.assertEqual(c.not_iv4, 4)
@@ -158,8 +159,13 @@ class TestStringAnnotations(unittest.TestCase):
                     self.assertNotIn('not_iv4', c.__dict__)
 
     def test_text_annotations(self):
-        from dataclass_textanno import Bar, Foo
+        # Mirror py3.14 behavior exactly; import from CPython tests module.
+        from test.test_dataclasses import dataclass_textanno
 
-        # Skip this test as it requires get_type_hints functionality
-        # that may not be fully compatible in Python 2.7
-        pass
+        self.assertEqual(
+            get_type_hints(dataclass_textanno.Bar),
+            {'foo': dataclass_textanno.Foo})
+        self.assertEqual(
+            get_type_hints(dataclass_textanno.Bar.__init__),
+            {'foo': dataclass_textanno.Foo,
+             'return': type(None)})

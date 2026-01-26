@@ -31,6 +31,7 @@ class TestReplace(unittest.TestCase):
             replace(c, x=3, z=20, t=50)
         with self.assertRaisesRegexp(TypeError, 'init=False'):
             replace(c, z=20)
+            replace(c, x=3, z=20, t=50)
 
         # Make sure the result is still frozen.
         with self.assertRaisesRegexp(FrozenInstanceError, "cannot assign to field 'x'"):
@@ -115,7 +116,7 @@ class TestReplace(unittest.TestCase):
         c = C(1, 10)
         self.assertEqual(c.x, 10)
         with self.assertRaisesRegexp(TypeError,
-                                     "InitVar 'y' must be specified with replace"):
+                                     r"InitVar 'y' must be specified with replace\(\)"):
             replace(c, x=3)
         c = replace(c, x=3, y=5)
         self.assertEqual(c.x, 15)
@@ -136,8 +137,8 @@ class TestReplace(unittest.TestCase):
 
         c = C(x=1, y=10, z=1)
         self.assertEqual(replace(c), C(x=12))
-        self.assertEqual(replace(c, y=4).x, 12)
-        self.assertEqual(replace(c, y=4, z=1).x, 12)
+        self.assertEqual(replace(c, y=4), C(x=12, y=4, z=42))
+        self.assertEqual(replace(c, y=4, z=1), C(x=12, y=4, z=1))
 
     def test_recursive_repr(self):
         @dataclass
@@ -146,7 +147,7 @@ class TestReplace(unittest.TestCase):
 
         c = C(None)
         c.f = c
-        self.assertIn("C(f=...", repr(c))
+        self.assertEqual(repr(c), "TestReplace.test_recursive_repr.<locals>.C(f=...)")
 
     def test_recursive_repr_two_attrs(self):
         @dataclass
@@ -157,7 +158,8 @@ class TestReplace(unittest.TestCase):
         c = C(None, None)
         c.f = c
         c.g = c
-        self.assertIn("C(f=..., g=...", repr(c))
+        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_two_attrs"
+                                  ".<locals>.C(f=..., g=...)")
 
     def test_recursive_repr_indirection(self):
         @dataclass
@@ -172,8 +174,9 @@ class TestReplace(unittest.TestCase):
         d = D(None)
         c.f = d
         d.f = c
-        self.assertIn("C(f=", repr(c))
-        self.assertIn("D(f=...", repr(c))
+        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_indirection"
+                                  ".<locals>.C(f=TestReplace.test_recursive_repr_indirection"
+                                  ".<locals>.D(f=...))")
 
     def test_recursive_repr_indirection_two(self):
         @dataclass
@@ -194,11 +197,10 @@ class TestReplace(unittest.TestCase):
         c.f = d
         d.f = e
         e.f = c
-        # Just verify the repr doesn't crash and contains expected parts
-        repr_str = repr(c)
-        self.assertIn("C(f=", repr_str)
-        self.assertIn("D(f=", repr_str)
-        self.assertIn("E(f=...", repr_str)
+        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_indirection_two"
+                                  ".<locals>.C(f=TestReplace.test_recursive_repr_indirection_two"
+                                  ".<locals>.D(f=TestReplace.test_recursive_repr_indirection_two"
+                                  ".<locals>.E(f=...)))")
 
     def test_recursive_repr_misc_attrs(self):
         @dataclass
@@ -208,4 +210,5 @@ class TestReplace(unittest.TestCase):
 
         c = C(None, 1)
         c.f = c
-        self.assertIn("C(f=..., g=1)", repr(c))
+        self.assertEqual(repr(c), "TestReplace.test_recursive_repr_misc_attrs"
+                                  ".<locals>.C(f=..., g=1)")

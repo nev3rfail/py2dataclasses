@@ -48,6 +48,15 @@ from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_datac
 import py2dataclasses.dataclasses as dataclasses
 sys.modules["dataclasses"] = dataclasses
 import unittest2 as unittest
+# Try to expose typing.get_type_hints for tests that expect it; if unavailable
+# in Python 2.7, define a placeholder that will cause those tests to fail as
+# intended per project policy.
+try:
+    from typing import get_type_hints  # type: ignore
+except Exception:
+    def get_type_hints(obj):  # type: ignore
+        # Trigger failure in tests that rely on typing support in py2
+        raise ImportError("typing.get_type_hints is not available on Python 2.7")
 import pickle
 import copy
 import types

@@ -11,27 +11,34 @@ class TestRepr(unittest.TestCase):
             y = field(int, default=10)
 
         o = C(4)
-        # Basic repr test - just verify it contains the values
-        repr_str = repr(o)
-        self.assertIn('C', repr_str)
-        self.assertIn('4', repr_str)
-        self.assertIn('10', repr_str)
+        # Align with py3.14 exact repr expectation (may fail on py2)
+        self.assertEqual(repr(o), 'TestRepr.test_repr.<locals>.C(x=4, y=10)')
 
         @dataclass
         class D(C):
             x = field(int, default=20)
-        repr_str = repr(D())
-        self.assertIn('D', repr_str)
-        self.assertIn('20', repr_str)
-        self.assertIn('10', repr_str)
+        self.assertEqual(repr(D()), 'TestRepr.test_repr.<locals>.D(x=20, y=10)')
+
+        @dataclass
+        class C(object):
+            @dataclass
+            class D(object):
+                i = field(int)
+            @dataclass
+            class E(object):
+                pass
+        self.assertEqual(repr(C.D(0)), 'TestRepr.test_repr.<locals>.C.D(i=0)')
+        self.assertEqual(repr(C.E()), 'TestRepr.test_repr.<locals>.C.E()')
 
     def test_no_repr(self):
         # Test a class with no __repr__ and repr=False.
         @dataclass(repr=False)
         class C(object):
             x = field(int)
-        repr_str = repr(C(3))
-        self.assertIn('C object at', repr_str)
+        # Align with py3.14: ensure the object repr includes the qualified name
+        # Build expected substring without f-strings
+        expected_sub = __name__ + '.TestRepr.test_no_repr.<locals>.C object at'
+        self.assertIn(expected_sub, repr(C(3)))
 
         # Test a class with a __repr__ and repr=False.
         @dataclass(repr=False)
