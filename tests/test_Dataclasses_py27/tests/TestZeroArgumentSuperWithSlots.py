@@ -70,7 +70,7 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
             foo = property()
             @foo.setter
             def foo(slf, val):
-                self.assertIs(__class__, type(slf))
+                self.assertIs(A, type(slf))
 
         a = A()
         a.foo = 4
@@ -81,7 +81,7 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
             foo = property()
             @foo.deleter
             def foo(slf):
-                self.assertIs(__class__, type(slf))
+                self.assertIs(A, type(slf))
 
         a = A()
         del a.foo

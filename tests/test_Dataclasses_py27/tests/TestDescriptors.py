@@ -1,6 +1,8 @@
 from __future__ import print_function, absolute_import
 
 from load_test import *
+from load_test import _2_or_3
+
 
 class TestDescriptors(unittest.TestCase):
     def test_set_name(self):
@@ -181,6 +183,6 @@ class TestDescriptors(unittest.TestCase):
         class C(object):
             i = field(D, default=D())
 
-        with self.assertRaisesRegexp(TypeError, 'missing 1 required positional argument'):
+        with self.assertRaisesRegexp(TypeError, _2_or_3("__init__\(\) takes exactly 2 arguments \(1 given\)",'missing 1 required positional argument')):
             c = C()
 
