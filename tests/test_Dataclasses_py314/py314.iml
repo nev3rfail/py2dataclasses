@@ -7,8 +7,8 @@
   </component>
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
-    <content url="file://$MODULE_DIR$/../test_Dataclasses_py314">
-      <excludeFolder url="file://$MODULE_DIR$/../test_Dataclasses_py314/.venv" />
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/.venv" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.14 (py2playground)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

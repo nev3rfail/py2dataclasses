@@ -7,11 +7,10 @@
   </component>
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
-    <content url="file://$MODULE_DIR$/../test_Dataclasses_py27">
+    <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/../../../venv-py27" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 2.7 (py2dataclasses)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 2.7 (py2playground)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="library" name="Python 2.7 virtualenv at F:\fun\py2playground\py2dataclasses\venv-py27 interpreter library" level="application" />
   </component>
 </module>

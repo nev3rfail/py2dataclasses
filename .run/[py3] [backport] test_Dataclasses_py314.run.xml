@@ -1,15 +1,16 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Python2 tests in test_Dataclasses_py27" type="tests" factoryName="Unittests">
-    <module name="py27" />
+  <configuration default="false" name="[py3] [backport] test_Dataclasses_py314" type="tests" factoryName="Unittests">
+    <module name="py314" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
-    <option name="SDK_HOME" value="$PROJECT_DIR$/venv-py27/Scripts/python.exe" />
-    <option name="SDK_NAME" value="Python 2.7 (py2dataclasses)" />
+    <option name="SDK_HOME" value="$PROJECT_DIR$/venv-py3/Scripts/python.exe" />
+    <option name="SDK_NAME" value="Python 3.14 virtualenv at F:\fun\py2playground\py2dataclasses\venv-py3" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
     <option name="IS_MODULE_SDK" value="true" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <EXTENSION ID="net.ashald.envfile">
       <option name="IS_ENABLED" value="false" />
       <option name="IS_SUBST" value="false" />
@@ -22,8 +23,8 @@
     </EXTENSION>
     <option name="_new_pattern" value="&quot;&quot;" />
     <option name="_new_additionalArguments" value="&quot;&quot;" />
-    <option name="_new_target" value="&quot;$PROJECT_DIR$/tests/test_Dataclasses_py27/__init__.py&quot;" />
-    <option name="_new_targetType" value="&quot;PATH&quot;" />
+    <option name="_new_target" value="&quot;tests.test_Dataclasses_py314&quot;" />
+    <option name="_new_targetType" value="&quot;PYTHON&quot;" />
     <method v="2" />
   </configuration>
 </component>
