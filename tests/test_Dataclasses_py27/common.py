@@ -1,10 +1,15 @@
 # Port of dataclasses tests to Python 2.7
 from __future__ import print_function, absolute_import
+
 import os
 import sys
+path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
+sys.path.insert(0, path)
+print(sys.path)
+import dataclasses
 import unittest
 from dataclasses import *
-import dataclasses
+
 #from dataclasses import field
 #import src.py2dataclasses
 #from src import py2dataclasses

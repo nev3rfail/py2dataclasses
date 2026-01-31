@@ -7,7 +7,11 @@ import types
 #import unittest2 as unittest
 import unittest
 #from . import py2dataclasses
-import py2dataclasses # as py2dataclasses
+
+try:
+    import py2dataclasses
+except ImportError:
+    import dataclasses as py2dataclasses
 def field_adapter(*args, **kwargs):
     f = py2dataclasses.field(*args, **kwargs)
     #f.type = _typ

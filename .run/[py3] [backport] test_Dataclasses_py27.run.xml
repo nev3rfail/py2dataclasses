@@ -25,16 +25,16 @@
     <method v="2" />
   </configuration>
   <configuration default="false" name="[py3] [backport] test_Dataclasses_py27" type="tests" factoryName="Unittests">
-    <module name="py314" />
+    <module name="tests" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <option name="SDK_HOME" value="$PROJECT_DIR$/venv-py3/Scripts/python.exe" />
     <option name="SDK_NAME" value="Python 3.14 virtualenv at F:\fun\py2playground\py2dataclasses\venv-py3" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
     <option name="IS_MODULE_SDK" value="true" />
-    <option name="ADD_CONTENT_ROOTS" value="false" />
-    <option name="ADD_SOURCE_ROOTS" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="net.ashald.envfile">
       <option name="IS_ENABLED" value="false" />
       <option name="IS_SUBST" value="false" />
