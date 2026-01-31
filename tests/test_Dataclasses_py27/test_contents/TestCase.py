@@ -1390,7 +1390,7 @@ class TestCase(unittest.TestCase):
         q = Q(1)
         q.y = 2
         samples = [P(1), P(1, 2), Q(1), q, R(1), R(1, [2, 3, 4])]
-        with expose_to_test(P, Q, R, namespace=TestCase.test_dataclasses_pickleable):
+        with expose_to_test(self.test_dataclasses_pickleable, P, Q, R):
             for sample in samples:
                 for proto in range(pickle.HIGHEST_PROTOCOL + 1):
                     with self.subTest(sample=sample, proto=proto):

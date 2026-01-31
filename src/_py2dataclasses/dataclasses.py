@@ -193,6 +193,10 @@ class Field(object):
         self.doc = doc
         self._field_type = None
 
+    @property
+    def __annotations__(self):
+        return {self.name:self.type}
+
     @recursive_repr()
     def __repr__(self):
         return ('{12!s}<{1!s}>(name=({0!r}),' +
@@ -311,6 +315,10 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
 # WIP descriptor delegation
 class _oneshot(Field):
     def __get__(self, instance, owner):
+        # if not instance:
+        #     if self.default is MISSING:
+        #         if self.default_factory is MISSING:
+        #
         if hasattr(self.default, "__get__"):
             v = self.default.__get__(instance, owner)
         else:
@@ -319,7 +327,9 @@ class _oneshot(Field):
             elif self.name and hasattr(instance, self.name):
                 v = object.__getattribute__(self, self.name)
             else:
-                v = self.default or self.default_factory()
+                v= self.default if self.default is not MISSING else self.default_factory()
+                #         if self.default_factory is MISSING:
+                #v = self.default or self.default_factory()
         return v
 
     def __set__(self, instance, value):
@@ -757,21 +767,22 @@ _hash_action = {(False, False, False, False): None,
 def collect_annotations(cls):
     items = []
     name_val_mapping = OrderedDict()
-    _ann = getattr(cls, "__annotations__", {})
+    _existing_annotations = cls.__dict__.get("__annotations__", None)#object.__getattribute__(cls, "__annotations__")
+
     i = 0
     for name, value in cls.__dict__.items():
         if isinstance(value, Field):
             vt = value.type
-            if vt is MISSING:
-                t = _ann.get(name, None)
-            else:
-                t = vt
+            #if vt is MISSING:
+            #    t = _ann.get(name, None)
+            #else:
+            t = vt
             if t is None:
                 raise TypeError(
                     '{0!r} is a field but has no type annotation'.format(name)
                 )
             #value.__set_name__(cls, name)
-            if value.name is MISSING:
+            if value.name is MISSING or value.name is None:
                 name_val_mapping[name] = value
             items.append((value.order, name, t))
             i = value.order
@@ -791,8 +802,11 @@ def collect_annotations(cls):
     items.sort(key=lambda x: x[0])  # sort by descriptor order
 
     ret = OrderedDict((name, t) for _, name, t in items)
+    if _existing_annotations:
+        ret.update(_existing_annotations)
     ##print(list(name_val_mapping.items()))
-    map(lambda name, value: (name, value.__set_name__(cls, name)), name_val_mapping)
+    if name_val_mapping:
+        map(lambda t: (t[0], t[1].__set_name__(cls, t[0])), six.iteritems(name_val_mapping))
     return ret
 
 def attach_debug_function(cls, fname, f):
@@ -1180,10 +1194,12 @@ def annotate(__annotations__, **kwargs):
     if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
-        if hasattr(f, '__annotations__'):
+        if "__annotations__" in f.__dict__:
             for k, v in kwargs.items():
                 f.__annotations__[k] = v
         else:
+            #object.__setattr__(f, "__annotations__",OrderedDict(kwargs))
+
             setattr(f, "__annotations__", OrderedDict(kwargs))
         return f
     return dec
@@ -1204,8 +1220,17 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     all fields are keyword-only. If slots is true, a new class with a
     __slots__ attribute is returned.
     """
-
+    # class F(object):
+    #     @property
+    #     def aa(self):
+    #         return 1
+    # F.bb = property(lambda self: 1)
+    # pass
     def wrap(cls):
+        #if six.PY2:
+        #    setattr(cls, "__annotations__", property(collect_annotations))
+        #if six.PY2 and getattr(cls, "__annotations__", None):
+        #    cls.__annotations__ = {}
         annotations = collect_annotations(cls)
         if annotations:
             annotate(__annotations__=annotations)(cls)

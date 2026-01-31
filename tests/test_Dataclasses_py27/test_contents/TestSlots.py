@@ -16,7 +16,7 @@ class TestSlots(unittest.TestCase):
             bar = field(int)
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
             with self.subTest(proto=proto):
-                with expose_to_test(FrozenWithoutSlotsClass, FrozenSlotsClass, namespace=TestSlots.test_frozen_pickle):
+                with expose_to_test(self.test_frozen_pickle, FrozenWithoutSlotsClass, FrozenSlotsClass):
                     obj = FrozenSlotsClass("a", 1)
                     pickled = pickle.dumps(obj, protocol=proto)
                     p = pickle.loads(pickled)
@@ -113,7 +113,7 @@ class TestSlots(unittest.TestCase):
 
 
 
-        with expose_to_test(FrozenSlotsAllStateClass, FrozenSlotsGetStateClass, FrozenSlotsSetStateClass,namespace=TestSlots.test_frozen_slots_pickle_custom_state):
+        with expose_to_test(self.test_frozen_slots_pickle_custom_state, FrozenSlotsAllStateClass, FrozenSlotsGetStateClass, FrozenSlotsSetStateClass):
 
             for proto in range(pickle.HIGHEST_PROTOCOL + 1):
                 with self.subTest(proto=proto):

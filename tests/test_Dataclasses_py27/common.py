@@ -39,23 +39,31 @@ import re
 _clear_locals = re.compile("\.<locals>")
 
 @contextmanager
-def expose_to_test( *classes, namespace=None, qualname=lambda cls_arg, one: one.__qualname__):
+def expose_to_test(namespace_fn=None, *classes):
     saved = []
-
+    stash = namespace_fn
     try:
         for cls in classes:
             classmodule = sys.modules[cls.__module__]
-            stash = namespace or classmodule
-            saved.append((stash, cls.__name__, getattr(classmodule, cls.__name__, None)))
+            saved.append((classmodule, cls.__name__, stash.im_func.func_dict.get(cls.__name__, None)))#.append((stash, cls.__name__, getattr(classmodule, cls.__name__, None)))
+
             cls.__qualname__ = re.sub(_clear_locals, "", cls.__qualname__)
-            setattr(stash, cls.__name__, cls)
+            setattr(classmodule, cls.__name__, cls)
+            stash.im_func.func_dict[cls.__name__] = cls
+            #cls.__name__
         yield
     finally:
-        for stash, name, orig in saved:
-            if orig is None:
-                delattr(stash, name)
+        for mod, name, orig in saved:
+
+            if orig is not None:
+                #delattr(stash, name)
+                setattr(mod, name, orig)
+                stash.im_func.func_dict[name] = orig
             else:
-                setattr(stash, name, orig)
+                delattr(mod, name)
+                del stash.im_func.func_dict[name]
+            #     stash.im_func.func_dict[cls.__name__] = orig
+            #     #
 
 
 
