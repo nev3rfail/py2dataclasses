@@ -11,14 +11,20 @@ import itertools
 import weakref
 from collections import OrderedDict
 
+import six
+
 from .abc_utils import update_abstractmethods
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
 from .class_utils import is_descriptor, qualname
-from dictproxyhack import dictproxy
+if six.PY2:
+    from dictproxyhack import dictproxy as _dict_proxy
+else:
+    _dict_proxy = types.MappingProxyType
+
 import typing
-MappingProxyType = dictproxy
+MappingProxyType = _dict_proxy # MappingProxyType = types.MappingProxyType
 GenericAlias = type(typing.List[int])
 
 class DataclassInstance(typing.Protocol):
@@ -752,8 +758,12 @@ def collect_annotations(cls):
     items = []
     i = 0
     for name, value in cls.__dict__.items():
+        print(name, value.__class__, isinstance(value, Field))
         if isinstance(value, Field):
-            t = value.type
+            print("T:", value, value.type)
+
+            if not t:
+                t = value.type
             if t is None:
                 raise TypeError(
                     '{0!r} is a field but has no type annotation'.format(name)
@@ -835,7 +845,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     for f in cls_fields:
         fields[f.name] = f
-
+        print(f)
+        print(getattr(cls, f.name, None))
         if isinstance(getattr(cls, f.name, None), Field):
             if f.type is MISSING:
                 raise TypeError('{0!r} is a field but has no type annotation'.format(f.name))
@@ -1191,7 +1202,9 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     """
 
     def wrap(cls):
+        print("D __annotations__:", cls.__annotations__)
         annotations = collect_annotations(cls)
+        print("D annotations:", annotations)
         if annotations:
             annotate(__annotations__=annotations)(cls)
         else:
