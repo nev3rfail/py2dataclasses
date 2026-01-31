@@ -25,8 +25,9 @@ from copy import deepcopy
 from functools import total_ordering, wraps
 
 import typing       # Needed for the string "typing.ClassVar[int]" to work as an annotation.
-from dataclasses import *
 import dataclasses
+from dataclasses import *
+
 from test import support
 from test.support import import_helper
 

@@ -1,26 +1,37 @@
+import functools
 import types
 import unittest
-import tests.test_Dataclasses_py314
+#import tests.test_Dataclasses_py314
 import os,sys
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 sys.path.insert(0, path)
 
-from src import py2dataclasses as py2dataclasses
+import py2dataclasses as dataclasses
+import _py2dataclasses as _py2dataclasses
+#from . import dataclasses
 def field_adapter(*args, **kwargs):
-    f = py2dataclasses.field(*args, **kwargs)
+    f = dataclasses._real_field(*args, **kwargs)
+    #if _typ is not dataclasses.MISSING:
+    #    f.type = _typ
+    return f
+def _dataclass_adapter(cls, *args, **kwargs):
+    #ann = collect_annotations(cls)
+    #if ann:
+    #    annotate(ann)(cls)
+    f = dataclasses._real_dataclass(cls, *args, **kwargs)
     #f.type = _typ
     return f
+
 def dataclass_adapter(cls=None, *args, **kwargs):
     if cls is None:
-        return _dataclass_adapter
+        return functools.partial(_dataclass_adapter, *args, **kwargs)
     else:
-        return _dataclass_adapter(cls)
-
+        return _dataclass_adapter(cls, *args, **kwargs)
 
 
 
 def patch_test(target_module):
-    sys.modules["dataclasses"] = py2dataclasses
+    ##sys.modules["dataclasses"] = py2dataclasses
     field_list = ('fields', 'field', 'Field',
                   'dataclass', 'is_dataclass',
                   'replace', 'make_dataclass',
@@ -31,12 +42,14 @@ def patch_test(target_module):
     for one in field_list:
 
         if one in patch_map:
+            target_module.__setattr__("_real_"+one, getattr(target_module, one))
             target_module.__setattr__(one, patch_map[one])
         else:
-            target_module.__setattr__(one, getattr(py2dataclasses, one))
+            target_module.__setattr__(one, getattr(dataclasses, one))
     #setattr(target_module, "__was_patched", True)
 
 
+##sys.modules["dataclasses"] = py2dataclasses
 #patch_test(sys.modules["tests.test_Dataclasses_py314"].common)
 import sys
 import os
@@ -55,7 +68,7 @@ def collect_annotations(cls):
     items = {}
     i = 0
     for name, value in cls.__dict__.items():
-        if isinstance(value, py2dataclasses.Field):
+        if isinstance(value, dataclasses.Field):
             t = value.type
             if t is None:
                 raise TypeError(
@@ -80,16 +93,21 @@ def annotate(__annotations__, **kwargs):
         return f
     return dec
 
-def _dataclass_adapter(cls, *args, **kwargs):
-    #ann = collect_annotations(cls)
-    #if ann:
-    #    annotate(ann)(cls)
-    f = py2dataclasses.dataclass(cls, *args, **kwargs)
-    #f.type = _typ
-    return f
+# def _dataclass_adapter(cls, *args, **kwargs):
+#     #ann = collect_annotations(cls)
+#     #if ann:
+#     #    annotate(ann)(cls)
+#     f = _py2dataclasses.dataclass(cls, *args, **kwargs)
+#     #f.type = _typ
+#     return f
 
 def load_tests(loader, tests, pattern):
     # Import the real test module
+    _old = sys.modules["dataclasses"]
+    sys.modules["dataclasses"] = dataclasses
+    patch_test(sys.modules["dataclasses"])
+    from .test_Dataclasses_py314 import common
+    #sys.modules["dataclasses"] = _old
     suite = loader.discover("tests.test_Dataclasses_py314", top_level_dir=os.getcwd())
     patch_test(sys.modules["tests.test_Dataclasses_py314"].common)
     #mod = mod.test_Dataclasses_py314

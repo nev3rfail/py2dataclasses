@@ -767,14 +767,19 @@ _hash_action = {(False, False, False, False): None,
 def collect_annotations(cls):
     items = []
     name_val_mapping = OrderedDict()
-    _existing_annotations = cls.__dict__.get("__annotations__", None)#object.__getattribute__(cls, "__annotations__")
+    try:
+        #cls.__dict__.get("__annotations__", None)#
+        _existing_annotations = object.__getattribute__(cls, "__annotations__")
+    except:
+        _existing_annotations = None
 
     i = 0
     for name, value in cls.__dict__.items():
         if isinstance(value, Field):
             vt = value.type
-            #if vt is MISSING:
-            #    t = _ann.get(name, None)
+            if vt is MISSING:
+                vt = _existing_annotations.get(name, vt) if _existing_annotations is not None else vt
+                #t = _ann.get(name, None)
             #else:
             t = vt
             if t is None:
@@ -800,14 +805,27 @@ def collect_annotations(cls):
 
 
     items.sort(key=lambda x: x[0])  # sort by descriptor order
-
-    ret = OrderedDict((name, t) for _, name, t in items)
+    retvar = OrderedDict()
+    collected = OrderedDict((name, t) for _, name, t in items)
     if _existing_annotations:
-        ret.update(_existing_annotations)
-    ##print(list(name_val_mapping.items()))
+        #retvar.update(_existing_annotations)
+        for k,v in _existing_annotations.items():
+            if k in collected:
+                value = collected.pop(k)
+                retvar[k] = value
+            else:
+                retvar[k] = v
+    for k, v in collected.items():
+        retvar[k] = v
+
+
+
+    # if _existing_annotations:
+    #     ret.update(_existing_annotations)
+    # ##print(list(name_val_mapping.items()))
     if name_val_mapping:
         map(lambda t: (t[0], t[1].__set_name__(cls, t[0])), six.iteritems(name_val_mapping))
-    return ret
+    return retvar
 
 def attach_debug_function(cls, fname, f):
     _set_new_attribute(cls, "fn_bodies", {})

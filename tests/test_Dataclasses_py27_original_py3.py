@@ -10,6 +10,14 @@ def field_adapter(_typ=dataclasses.MISSING, *args, **kwargs):
     if _typ is not MISSING:
         f.type = _typ
     return f
+def _dataclass_adapter(cls, *args, **kwargs):
+    ann = collect_annotations(cls)
+    if ann:
+        annotate(ann)(cls)
+    f = dataclasses._real_dataclass(cls, *args, **kwargs)
+    #f.type = _typ
+    return f
+
 def dataclass_adapter(cls=None, *args, **kwargs):
     if cls is None:
         return functools.partial(_dataclass_adapter, *args, **kwargs)
