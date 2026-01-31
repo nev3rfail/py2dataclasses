@@ -304,8 +304,8 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     mode = kwargs["mode"] if "mode" in kwargs else 1
     f = _field(default, default_factory, init, repr, hash, compare,
                   metadata, kw_only, doc, _cls=_oneshot if mode == 1 else Field)
-    if _typ == MISSING and default != MISSING:
-        _typ = type(default)
+    #if _typ == MISSING and default != MISSING:
+    #    _typ = type(default)
 
     #object.__setattr__(f, "_value_type", _typ)
     f.type = _typ
@@ -670,7 +670,8 @@ def _get_field(cls, a_name, a_type, default_kw_only):
 
     # Only at this point do we know the name and the type.  Set them.
     #f.name = a_name
-    f.__set_name__(cls, a_name)
+    if f.name != a_name:
+        f.__set_name__(cls, a_name)
     f.type = a_type
 
     # Assume it's a normal field until proven otherwise.
@@ -767,11 +768,7 @@ _hash_action = {(False, False, False, False): None,
 def collect_annotations(cls):
     items = []
     name_val_mapping = OrderedDict()
-    try:
-        #cls.__dict__.get("__annotations__", None)#
-        _existing_annotations = object.__getattribute__(cls, "__annotations__")
-    except:
-        _existing_annotations = None
+    _existing_annotations = _has_annotations(cls)
 
     i = 0
     for name, value in cls.__dict__.items():
@@ -1205,6 +1202,12 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
 
     return newcls
 
+def _has_annotations(cls):
+    try:
+        return object.__getattribute__(cls, "__annotations__")
+    except:
+        return None
+
 def annotate(__annotations__, **kwargs):
     """Python 3 compatible function annotation for Python 2."""
     if __annotations__ and not kwargs:
@@ -1212,7 +1215,7 @@ def annotate(__annotations__, **kwargs):
     if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
-        if "__annotations__" in f.__dict__:
+        if _has_annotations(f):
             for k, v in kwargs.items():
                 f.__annotations__[k] = v
         else:
