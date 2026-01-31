@@ -1422,6 +1422,19 @@ def _astuple_inner(obj, tuple_factory):
     else:
         return copy.deepcopy(obj)
 
+def _make_class(name, bases=(), kwds=None, exec_body=None):
+    fn = getattr(types, "new_class", None)
+    if fn is not None:
+        cls = fn(name, bases, kwds, exec_body)
+    else:
+        namespace = OrderedDict()
+        namespace.update(kwds)
+        if exec_body:
+            exec_body(namespace)
+        cls = type(name, bases, namespace)
+
+    return cls
+
 
 def make_dataclass(
         cls_name, # type: str
@@ -1467,7 +1480,7 @@ def make_dataclass(
 
     if namespace is None:
         namespace = OrderedDict()
-    elif type(namespace) is dict:
+    else:
         namespace = OrderedDict(namespace)
 
 
@@ -1498,21 +1511,22 @@ def make_dataclass(
         annotations[name] = tp
 
     # Update namespace
-    namespace.update(defaults)
+    def annotate_method(format=None):
+        def get_any():
+            return 'typing.Any'
+        annos = OrderedDict()
+        for one, t in annotations.items():
+            annos[one] = get_any() if t is _ANY_MARKER else t
+        return annos
 
-    # Convert _ANY_MARKER to typing.Any in annotations
-    import typing
-    final_annotations = OrderedDict()
-    for name, tp in annotations.items():
-        if tp is _ANY_MARKER:
-            final_annotations[name] = typing.Any
-        else:
-            final_annotations[name] = tp
-    namespace['__annotations__'] = final_annotations
+    namespace['__annotations__'] = annotate_method(annotate_method)
 
+    def exec_body_callback(ns):
+        ns.update(namespace)
+        ns.update(defaults)
     # Create the class
-    cls = type(cls_name, bases, namespace)
-
+    cls = _make_class(cls_name, bases, OrderedDict(), exec_body_callback)#type(cls_name, bases, namespace)
+    cls.__annotate__ = annotate_method
     # Set module
     if module is None:
         try:

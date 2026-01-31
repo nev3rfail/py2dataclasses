@@ -18,7 +18,8 @@ __all__ = ['dataclass',
            'is_dataclass',
            '_oneshot',
            'ABC',
-           '_dataclass_getstate'
+           '_dataclass_getstate',
+           '_dataclass_setstate',
            #  'of_factory',
            # 'of_typed',
            # 'ann',
@@ -29,4 +30,4 @@ __all__ = ['dataclass',
 
 from .dataclasses import dataclass, field, Field, FrozenInstanceError, InitVar, KW_ONLY, MISSING, fields, asdict, \
     astuple, make_dataclass, replace, is_dataclass, of, _oneshot, \
-    _dataclass_getstate  # of_factory, of_typed, ann, IntField, typed
+    _dataclass_getstate, _dataclass_setstate  # of_factory, of_typed, ann, IntField, typed
