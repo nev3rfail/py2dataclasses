@@ -35,22 +35,27 @@ import funcsigs
 from collections import OrderedDict
 from contextlib import contextmanager
 import sys
+import re
+_clear_locals = re.compile("\.<locals>")
 
 @contextmanager
-def expose_to_test(*classes):
+def expose_to_test( *classes, namespace=None, qualname=lambda cls_arg, one: one.__qualname__):
     saved = []
+
     try:
         for cls in classes:
-            mod = sys.modules[cls.__module__]
-            saved.append((mod, cls.__name__, getattr(mod, cls.__name__, None)))
-            setattr(mod, cls.__name__, cls)
+            classmodule = sys.modules[cls.__module__]
+            stash = namespace or classmodule
+            saved.append((stash, cls.__name__, getattr(classmodule, cls.__name__, None)))
+            cls.__qualname__ = re.sub(_clear_locals, "", cls.__qualname__)
+            setattr(stash, cls.__name__, cls)
         yield
     finally:
-        for mod, name, orig in saved:
+        for stash, name, orig in saved:
             if orig is None:
-                delattr(mod, name)
+                delattr(stash, name)
             else:
-                setattr(mod, name, orig)
+                setattr(stash, name, orig)
 
 
 

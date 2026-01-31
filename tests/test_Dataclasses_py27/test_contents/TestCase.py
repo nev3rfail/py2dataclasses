@@ -56,7 +56,7 @@ class TestCase(unittest.TestCase):
         class C(object):
             #__annotations__ = {'x': int, 'y': int}
             x = field(int)
-            y = field(int, 0)
+            y = field(int, default=0)
 
         o = C(3)
         self.assertEqual((o.x, o.y), (3, 0))
@@ -68,7 +68,7 @@ class TestCase(unittest.TestCase):
             @dataclass
             class C(object):
                 #__annotations__ = {'x': int, 'y': int}
-                x = field(int, 0)
+                x = field(int, default=0)
                 y = field(int)
 
     def test_field_no_default(self):
@@ -125,8 +125,8 @@ class TestCase(unittest.TestCase):
         @dataclass
         class C(object):
             #__annotations__ = {'x': int, 'y': int}
-            x = field(int, 0)
-            y = field(compare=False, default=4)
+            x = field(int, default=0)
+            y = field(int, compare=False, default=4)
 
         self.assertEqual(C(), C(0, 20))
         self.assertEqual(C(1, 10), C(1, 20))
@@ -174,9 +174,9 @@ class TestCase(unittest.TestCase):
             x = field(int)
             #ss0 = sys._getframe(0)
             #ss = sys._getframe(1)
-            y = field(int, 0)
+            y = field(int, default=0)
             z = field(int, init=False)
-            t = field(int, 10)
+            t = field(int, default=10)
         #a = C(0)
 
         #bb = a.z
@@ -262,14 +262,14 @@ class TestCase(unittest.TestCase):
         @dataclass
         class B(object):
             #__annotations__ = OrderedDict((('a', str), ('b', str), ('c', str)))
-            a = field(str, 'B:a')
-            b = field(str, 'B:b')
-            c = field(str, 'B:c')
+            a = field(str, default='B:a')
+            b = field(str, default='B:b')
+            c = field(str, default='B:c')
 
         @dataclass
         class C(B):
             ##__annotations__ = {'b': str}
-            b = field(str, 'C:b')
+            b = field(str, default='C:b')
 
         self.assertEqual([(f.name, f.default) for f in fields(C)],
                          [('a', 'B:a'),
@@ -288,8 +288,7 @@ class TestCase(unittest.TestCase):
                                              'x is not allowed'):
                     @dataclass
                     class Point(object):
-                        #__annotations__ = {'x': typ}
-                        x = field(typ, empty)
+                        x = field(typ, default=empty)
 
     def test_no_options(self):
         # Call with dataclass().
@@ -330,7 +329,7 @@ class TestCase(unittest.TestCase):
         @dataclass
         class C(object):
             #__annotations__ = {'i': int}
-            i = field(int, 10)
+            i = field(int, default=10)
 
             def __post_init__(self):
                 if self.i == 10:
@@ -375,7 +374,7 @@ class TestCase(unittest.TestCase):
         self.assertIsNot(asdict(c), asdict(c))
         c.x = 42
         self.assertEqual(asdict(c), OrderedDict((('x', 42), ('y', 2))))
-        self.assertIs(type(asdict(c, dict)), dict)
+        self.assertIs(type(asdict(c, dict_factory=dict)), dict)
 
     def test_helper_asdict_raises_on_classes(self):
         # asdict() should raise on a class object.
@@ -415,8 +414,8 @@ class TestCase(unittest.TestCase):
         @dataclass
         class C(object):
             #__annotations__ = {'x': int, 'y': int}
-            x = field(_typ=int)
-            y = field(int, 0)
+            x = field(int)
+            y = field(int, default=0)
 
         c = C(1)
 
@@ -765,13 +764,13 @@ class TestCase(unittest.TestCase):
         from typing import Any
         @dataclass
         class Base(object):
-            x = field(Any, 15.0)
-            y = field(int, 0)
+            x = field(Any, default=15.0)
+            y = field(int, default=0)
 
         @dataclass
         class C1(Base):
-            z = field(int, 10)
-            x = field(int, 15)
+            z = field(int, default=10)
+            x = field(int, default=15)
 
         o = Base()
         self.assertIn('Base(x=15.0, y=0)', repr(o))
@@ -1206,13 +1205,13 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class B0(object):
-            b_called = field(bool, False)
+            b_called = field(bool, default=False)
             def __post_init__(self):
                 self.b_called = True
 
         @dataclass
         class C0(A0, B0):
-            c_called = field(bool, False)
+            c_called = field(bool, default=False)
             def __post_init__(self):
                 super(C0, self).__post_init__()
                 self.c_called = True
@@ -1234,13 +1233,13 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class B1(object):
-            b_called = field(bool, False)
+            b_called = field(bool, default=False)
             def __post_init__(self):
                 self.b_called = True
 
         @dataclass
         class C1(A1, B1):
-            c_called = field(bool, False)
+            c_called = field(bool, default=False)
             def __post_init__(self):
                 super(C1, self).__post_init__()
                 self.c_called = True
@@ -1333,7 +1332,7 @@ class TestCase(unittest.TestCase):
         @dataclass
         class LabeledBox(object):
             content = field(T)
-            label = field(str, 'unknown')
+            label = field(str, default='unknown')
 
         box = LabeledBox(42)
         self.assertEqual(box.content, 42)
@@ -1376,7 +1375,7 @@ class TestCase(unittest.TestCase):
         @dataclass
         class P(object):
             x = field(int)
-            y = field(int, 0)
+            y = field(int, default=0)
 
         @dataclass
         class Q(object):
@@ -1391,7 +1390,7 @@ class TestCase(unittest.TestCase):
         q = Q(1)
         q.y = 2
         samples = [P(1), P(1, 2), Q(1), q, R(1), R(1, [2, 3, 4])]
-        with expose_to_test(P, Q, R):
+        with expose_to_test(P, Q, R, namespace=TestCase.test_dataclasses_pickleable):
             for sample in samples:
                 for proto in range(pickle.HIGHEST_PROTOCOL + 1):
                     with self.subTest(sample=sample, proto=proto):
@@ -1418,11 +1417,11 @@ class TestCase(unittest.TestCase):
         @dataclass
         class C(object):
             x = field(int)
-            y = field(int, 10)
-            z = field(ClassVar[int], 1000)
-            w = field(ClassVar[int], 2000)
-            t = field(ClassVar[int], 3000)
-            s = field(ClassVar, 4000)
+            y = field(int, default=10)
+            z = field(ClassVar[int], default=1000)
+            w = field(ClassVar[int], default=2000)
+            t = field(ClassVar[int], default=3000)
+            s = field(ClassVar, default=4000)
 
         c = C(5)
         self.assertIn('C(x=5, y=10)', repr(c))
@@ -1463,7 +1462,7 @@ class TestCase(unittest.TestCase):
         from typing import ClassVar
         @dataclass
         class C(object):
-            x = field(ClassVar[int], 10)
+            x = field(ClassVar[int], default=10)
         self.assertEqual(C.x, 10)
 
     def test_class_var_frozen(self):
@@ -1472,10 +1471,10 @@ class TestCase(unittest.TestCase):
         @dataclass(frozen=True)
         class C(object):
             x = field(int)
-            y = field(int, 10)
-            z = field(ClassVar[int], 1000)
-            w = field(ClassVar[int], 2000)
-            t = field(ClassVar[int], 3000)
+            y = field(int, default=10)
+            z = field(ClassVar[int], default=1000)
+            w = field(ClassVar[int], default=2000)
+            t = field(ClassVar[int], default=3000)
 
         c = C(5)
         self.assertIn('C(x=5, y=10)', repr(c))
@@ -1514,15 +1513,15 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class C(object):
-            x = field(InitVar(int), 10)
+            x = field(InitVar(int), default=10)
         self.assertEqual(C.x, 10)
 
     def test_init_var(self):
 
         @dataclass
         class C(object):
-            x = field(int, None)
-            init_param = field(InitVar(int), None)
+            x = field(int, default=None)
+            init_param = field(InitVar(int), default=None)
 
             def __post_init__(self, init_param):
                 if self.x is None:
@@ -1617,7 +1616,7 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class Bar(Foo):
-            y = field(int, 1)
+            y = field(int, default=1)
 
         self.assertEqual(Foo().x, {})
         self.assertEqual(Bar().x, {})
@@ -1948,12 +1947,12 @@ class TestCase(unittest.TestCase):
         with self.assertRaisesRegexp(ValueError, unhashable_re):
             @dataclass
             class A(object):
-                a = field(dict, {})
+                a = field(dict, default={})
 
         with self.assertRaisesRegexp(ValueError, unhashable_re):
             @dataclass
             class A(object):
-                a = field(object, Unhashable())
+                a = field(object, default=Unhashable())
 
     def test_items_in_dicts(self):
         @dataclass
@@ -1962,7 +1961,7 @@ class TestCase(unittest.TestCase):
             b = field(list, default_factory=list, init=False)
             c = field(list, default_factory=list)
             d = field(int, default=4, init=False)
-            e = field(int, 0)
+            e = field(int, default=0)
 
         c = C(0)
         # Class dict
@@ -1992,7 +1991,7 @@ class TestCase(unittest.TestCase):
             c = field(list, default_factory=list, init=False)
             d = field(list, default_factory=list)
             e = field(int, default=4, init=False)
-            f = field(int, 4)
+            f = field(int, default=4)
 
         calls = []
         original_setattr = C.__setattr__
