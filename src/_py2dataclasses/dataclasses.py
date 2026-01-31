@@ -14,6 +14,7 @@ from collections import OrderedDict
 import six
 
 from .abc_utils import update_abstractmethods
+from .type_utils import make_alias
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
@@ -25,7 +26,7 @@ else:
 
 import typing
 MappingProxyType = _dict_proxy # MappingProxyType = types.MappingProxyType
-GenericAlias = type(typing.List[int])
+#GenericAlias = type(typing.List[int])
 
 class DataclassInstance(typing.Protocol):
     __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, Field[typing.Any]]]
@@ -123,32 +124,22 @@ _ATOMIC_TYPES = frozenset({
 # without importing `typing` module.
 _ANY_MARKER = object()
 
-class _GenericMeta(abc.ABCMeta):
 
-    def __getitem__(cls, typ):
-        n = type("{}[{}]".format(cls.__name__, typ.__name__), (cls,), {"__origin__":weakref.ref(cls), "__parameters__":typ})
 
-        return n
-#f = typing.GenericMeta
+InitVar = make_alias("InitVar", "T")
 
-class InitVar(object):
-    __metaclass__ = _GenericMeta
-    __slots__ = ('type',)
-
-    def __init__(self, type_):
-        self.type = type_
-
-    def __repr__(self):
-        if isinstance(self.type, type):
-            type_name = self.type.__name__
-        else:
-            # typing objects, e.g. List[int]
-            type_name = repr(self.type)
-        return 'dataclasses.InitVar[{0}]'.format(type_name)
-
-    @classmethod
-    def __class_getitem__(cls, type_):
-        return InitVar(type_)
+# class InitVar(GenericAlias):
+#     #__metaclass__ = _GenericMeta
+#     #__slots__ = ('type',)
+#
+#     # def __init__(self, type_):
+#     #     self.type = type_
+#
+#
+#
+#     # def __getitem__(cls, type_):
+#     #     return
+#     pass
 
 
 # Instances of Field are only ever created from within this module,
@@ -220,7 +211,7 @@ class Field(object):
         if func:
             func(self.default, owner, name)
 
-    __class_getitem__ = classmethod(GenericAlias)
+    #__class_getitem__ = classmethod(GenericAlias)
 
 
 class _DataclassParams(object):

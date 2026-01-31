@@ -2049,7 +2049,7 @@ class TestCase(unittest.TestCase):
     def test_is_dataclass_genericalias(self):
 
         @dataclass
-        class A(types.GenericAlias):
+        class A(GenericAlias):
             origin = field(type)
             args = field(type)
         self.assertTrue(is_dataclass(A))

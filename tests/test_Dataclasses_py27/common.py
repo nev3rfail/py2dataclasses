@@ -95,6 +95,13 @@ except ImportError:
     from _py2dataclasses import abc_utils as __abc_utils
     #import __abc_utils.ABC as ABC
     ABC = __abc_utils.ABC
+
+try:
+    import types.GenericAlias as GenericAlias
+except ImportError:
+    from _py2dataclasses import type_utils as __type_utils
+    #import __abc_utils.ABC as ABC
+    GenericAlias = __type_utils.GenericAlias
 #sys.modules["dataclasses"] = dataclasses
 #import unittest2 as unittest
 # Try to expose typing.get_type_hints for tests that expect it; if unavailable
