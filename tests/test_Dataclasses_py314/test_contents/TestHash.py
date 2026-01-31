@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestHash(unittest.TestCase):
     def test_unsafe_hash(self):
         @dataclass(unsafe_hash=True)

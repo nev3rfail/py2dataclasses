@@ -1,6 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
+from ..common import *
 
 class TestInitAnnotate(unittest.TestCase):
     # Tests for annotation handling in __init__

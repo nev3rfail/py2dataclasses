@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestEq(unittest.TestCase):
     def test_recursive_eq(self):
         # Test a class with recursive child

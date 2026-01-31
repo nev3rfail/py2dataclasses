@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestInit(unittest.TestCase):
     def test_base_has_init(self):
         class B:

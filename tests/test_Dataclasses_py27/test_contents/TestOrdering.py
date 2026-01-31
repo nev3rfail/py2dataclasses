@@ -1,6 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
+from ..common import *
 from functools import total_ordering
 class TestOrdering(unittest.TestCase):
     def test_functools_total_ordering(self):

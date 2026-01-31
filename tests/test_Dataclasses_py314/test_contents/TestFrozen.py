@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestFrozen(unittest.TestCase):
     def test_frozen(self):
         @dataclass(frozen=True)

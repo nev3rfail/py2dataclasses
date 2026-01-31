@@ -2,7 +2,7 @@ from __future__ import print_function, absolute_import
 
 from copy import deepcopy
 
-from common import *
+from ..common import *
 
 class TestFrozen(unittest.TestCase):
     def test_frozen(self):

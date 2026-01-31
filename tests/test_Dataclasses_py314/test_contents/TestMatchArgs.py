@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 
 class TestMatchArgs(unittest.TestCase):
     def test_match_args(self):

@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="[py3] [backport] test_Dataclasses_py314" type="tests" factoryName="Unittests">
-    <module name="py314" />
+    <module name="tests" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
@@ -10,7 +10,6 @@
     <option name="IS_MODULE_SDK" value="true" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
-    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <EXTENSION ID="net.ashald.envfile">
       <option name="IS_ENABLED" value="false" />
       <option name="IS_SUBST" value="false" />
@@ -23,8 +22,8 @@
     </EXTENSION>
     <option name="_new_pattern" value="&quot;&quot;" />
     <option name="_new_additionalArguments" value="&quot;&quot;" />
-    <option name="_new_target" value="&quot;tests.test_Dataclasses_py314&quot;" />
-    <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+    <option name="_new_target" value="&quot;$PROJECT_DIR$/tests/test_Dataclasses_py314_backport_py3.py&quot;" />
+    <option name="_new_targetType" value="&quot;PATH&quot;" />
     <method v="2" />
   </configuration>
 </component>

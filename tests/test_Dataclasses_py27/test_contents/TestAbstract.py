@@ -4,7 +4,7 @@ import abc
 
 import six
 
-from common import *
+from ..common import *
 
 
 class TestAbstract(unittest.TestCase):

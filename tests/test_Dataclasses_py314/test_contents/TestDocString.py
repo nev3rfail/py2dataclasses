@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestDocString(unittest.TestCase):
     def assertDocStrEqual(self, a, b):
         # Because 3.6 and 3.7 differ in how inspect.signature work

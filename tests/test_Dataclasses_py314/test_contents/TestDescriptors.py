@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 
 class TestDescriptors(unittest.TestCase):
     def test_set_name(self):

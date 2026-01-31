@@ -756,19 +756,23 @@ _hash_action = {(False, False, False, False): None,
 
 def collect_annotations(cls):
     items = []
+    name_val_mapping = OrderedDict()
+    _ann = getattr(cls, "__annotations__", {})
     i = 0
     for name, value in cls.__dict__.items():
-        print(name, value.__class__, isinstance(value, Field))
         if isinstance(value, Field):
-            print("T:", value, value.type)
-
-            if not t:
-                t = value.type
+            vt = value.type
+            if vt is MISSING:
+                t = _ann.get(name, None)
+            else:
+                t = vt
             if t is None:
                 raise TypeError(
                     '{0!r} is a field but has no type annotation'.format(name)
                 )
-            value.__set_name__(cls, name)
+            #value.__set_name__(cls, name)
+            if value.name is MISSING:
+                name_val_mapping[name] = value
             items.append((value.order, name, t))
             i = value.order
         # elif is_descriptor(value):
@@ -787,6 +791,8 @@ def collect_annotations(cls):
     items.sort(key=lambda x: x[0])  # sort by descriptor order
 
     ret = OrderedDict((name, t) for _, name, t in items)
+    ##print(list(name_val_mapping.items()))
+    map(lambda name, value: (name, value.__set_name__(cls, name)), name_val_mapping)
     return ret
 
 def attach_debug_function(cls, fname, f):
@@ -845,8 +851,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     for f in cls_fields:
         fields[f.name] = f
-        print(f)
-        print(getattr(cls, f.name, None))
         if isinstance(getattr(cls, f.name, None), Field):
             if f.type is MISSING:
                 raise TypeError('{0!r} is a field but has no type annotation'.format(f.name))
@@ -1202,9 +1206,7 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     """
 
     def wrap(cls):
-        print("D __annotations__:", cls.__annotations__)
         annotations = collect_annotations(cls)
-        print("D annotations:", annotations)
         if annotations:
             annotate(__annotations__=annotations)(cls)
         else:

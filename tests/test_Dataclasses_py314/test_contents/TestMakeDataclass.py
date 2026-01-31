@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 
 ByMakeDataClass = make_dataclass('ByMakeDataClass', [('x', int)])
 ManualModuleMakeDataClass = make_dataclass('ManualModuleMakeDataClass',

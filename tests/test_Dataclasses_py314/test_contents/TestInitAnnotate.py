@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestInitAnnotate(unittest.TestCase):
     # Tests for the generated __annotate__ function for __init__
     # See: https://github.com/python/cpython/issues/137530

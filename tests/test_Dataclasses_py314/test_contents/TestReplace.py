@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 
 class TestReplace(unittest.TestCase):
     def test(self):

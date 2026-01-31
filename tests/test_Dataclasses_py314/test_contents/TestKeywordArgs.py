@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestKeywordArgs(unittest.TestCase):
     def test_no_classvar_kwarg(self):
         msg = 'field a is a ClassVar but specifies kw_only'

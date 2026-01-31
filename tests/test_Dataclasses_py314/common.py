@@ -4,8 +4,6 @@
 
 import sys
 import os
-# sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-# from py2dataclasses.dataclasses import *
 
 import abc
 import annotationlib
@@ -28,6 +26,7 @@ from functools import total_ordering, wraps
 
 import typing       # Needed for the string "typing.ClassVar[int]" to work as an annotation.
 from dataclasses import *
+import dataclasses
 from test import support
 from test.support import import_helper
 

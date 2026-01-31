@@ -2,11 +2,18 @@
 from __future__ import print_function, absolute_import
 import os
 import sys
-
+import unittest
+from dataclasses import *
+import dataclasses
+#from dataclasses import field
+#import src.py2dataclasses
+#from src import py2dataclasses
 import six
 
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
-sys.path.insert(0, path)
+#path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+#sys.path.insert(0, path)
+
+#from dataclasses import *
 from functools import wraps
 import inspect
 try:
@@ -23,7 +30,7 @@ import funcsigs
 from collections import OrderedDict
 from contextlib import contextmanager
 import sys
-
+a = field()
 @contextmanager
 def expose_to_test(*classes):
     saved = []
@@ -48,15 +55,28 @@ def _2_or_3(for_2, for_3):
     elif six.PY3:
         return for_3
 
+aa = field()
+# import typing
+# if typing.TYPE_CHECKING:
+#     a = field()
+#     #import field
+#     # from py2dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+#     #     astuple, FrozenInstanceError, MISSING, InitVar, KW_ONLY
+#     #import py2dataclasses.dataclasses as dataclasses
+
 from typing import ClassVar
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",".."))
-sys.path.append(path)
-from py2dataclasses.dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
-    astuple, FrozenInstanceError, MISSING, InitVar, KW_ONLY
-import py2dataclasses.dataclasses as dataclasses
-from py2dataclasses import ABC
-sys.modules["dataclasses"] = dataclasses
-import unittest2 as unittest
+# path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# sys.path.append(path)
+# from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+#     astuple, FrozenInstanceError, MISSING, InitVar, KW_ONLY, dataclass
+# import dataclasses
+
+try:
+    import abc.ABC as ABC
+except ImportError:
+    from _py2dataclasses.abc_utils import ABC as ABC
+#sys.modules["dataclasses"] = dataclasses
+#import unittest2 as unittest
 # Try to expose typing.get_type_hints for tests that expect it; if unavailable
 # in Python 2.7, define a placeholder that will cause those tests to fail as
 # intended per project policy.

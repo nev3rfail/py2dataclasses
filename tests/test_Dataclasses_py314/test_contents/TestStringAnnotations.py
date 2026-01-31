@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestStringAnnotations(unittest.TestCase):
     def test_classvar(self):
         # Some expressions recognized as ClassVar really aren't.  But

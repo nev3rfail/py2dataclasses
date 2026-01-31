@@ -22,8 +22,8 @@
     </EXTENSION>
     <option name="_new_pattern" value="&quot;&quot;" />
     <option name="_new_additionalArguments" value="&quot;&quot;" />
-    <option name="_new_target" value="&quot;tests.test_Dataclasses_py27&quot;" />
-    <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+    <option name="_new_target" value="&quot;$PROJECT_DIR$/tests/test_Dataclasses_py27_backport_py2.py&quot;" />
+    <option name="_new_targetType" value="&quot;PATH&quot;" />
     <method v="2" />
   </configuration>
 </component>

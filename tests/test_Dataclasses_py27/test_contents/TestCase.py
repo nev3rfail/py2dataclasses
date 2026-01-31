@@ -1,6 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
+from ..common import *
 class TestCase(unittest.TestCase):
     def assertNotHasAttr(self, obj, name):
         self.assertFalse(hasattr(obj, name),

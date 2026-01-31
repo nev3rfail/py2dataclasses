@@ -1,6 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
+from ..common import *
 
 class TestKeywordArgs(unittest.TestCase):
     def test_no_classvar_kwarg(self):

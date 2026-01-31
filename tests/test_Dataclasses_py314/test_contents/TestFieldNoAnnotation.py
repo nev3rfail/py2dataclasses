@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestFieldNoAnnotation(unittest.TestCase):
     def test_field_without_annotation(self):
         with self.assertRaisesRegex(TypeError,

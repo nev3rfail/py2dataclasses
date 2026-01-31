@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestSlots(unittest.TestCase):
     def test_simple(self):
         @dataclass

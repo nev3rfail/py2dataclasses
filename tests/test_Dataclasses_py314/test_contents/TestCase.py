@@ -1,5 +1,5 @@
 
-from common import *
+from ..common import *
 
 class TestCase(unittest.TestCase):
     def test_no_fields(self):

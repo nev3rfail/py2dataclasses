@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestOrdering(unittest.TestCase):
     def test_functools_total_ordering(self):
         # Test that functools.total_ordering works with this class.

@@ -1,4 +1,4 @@
-from common import *
+from ..common import *
 class TestZeroArgumentSuperWithSlots(unittest.TestCase):
     def test_zero_argument_super(self):
         @dataclass(slots=True)

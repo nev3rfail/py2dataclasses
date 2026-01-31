@@ -9,11 +9,25 @@ description = "Somewhat PEP-557 compatible python 2.7 dataclasses port"
 authors = ["nev3rfail"]
 license = "MIT"
 readme = "README.md"
-
-
-
+[dependency-groups]
+dev = [
+    #"pytest (>=6.0.0,<7.0.0)",
+    "unittest2",
+    "tox"
+]
+[tool.poetry.scripts]
+#test = { module = 'tests.test_Dataclasses_py27' }
+my_package_cli = 'tests.test_Dataclasses_py27'
+aa = { module = 'tests.test_Dataclasses_py314' }
 [tool.poetry.dependencies]
-python = "==2.7.18"
+python = ">=2.7,<4"
+dictproxyhack = "*"
+typing = { version = "*", python = "<3.5" }
 
-[tool.poetry.dev-dependencies]
-python = "==3.14"
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+six = "*"
+unittest2 = "*"
+funcsigs = "*"
+tox = { version = "<4", python = ">=3.8,<3.12" }
+#virtualenv = { version = "<20", python = ">=3.8,<3.12" }

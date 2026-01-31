@@ -1,8 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
-from common import _2_or_3
-
+from ..common import *
 
 class TestDescriptors(unittest.TestCase):
     def test_set_name(self):

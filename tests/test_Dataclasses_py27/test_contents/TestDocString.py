@@ -1,6 +1,6 @@
 from __future__ import print_function, absolute_import
 
-from common import *
+from ..common import *
 
 class TestDocString(unittest.TestCase):
     def assertDocStrEqual(self, a, b):
@@ -103,7 +103,7 @@ class TestDocString(unittest.TestCase):
         import textwrap
         ns = {}
         exec(textwrap.dedent("""
-from py2dataclasses.dataclasses import dataclass
+from dataclasses import dataclass
 
 @dataclass
 class C(object):
