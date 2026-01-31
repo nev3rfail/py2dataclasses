@@ -4,7 +4,8 @@
 import sys
 import os
 from collections import OrderedDict
-import unittest
+import unittest2 as unittest
+sys.modules["unittest"] = unittest
 #import pytest
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, path)

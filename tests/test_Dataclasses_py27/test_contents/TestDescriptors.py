@@ -181,6 +181,6 @@ class TestDescriptors(unittest.TestCase):
         class C(object):
             i = field(D, default=D())
 
-        with self.assertRaisesRegexp(TypeError, _2_or_3("__init__\(\) takes exactly 2 arguments \(1 given\)",'missing 1 required positional argument')):
+        with self.assertRaisesRegexp(TypeError, choose_2_or_3("__init__\(\) takes exactly 2 arguments \(1 given\)",'missing 1 required positional argument')):
             c = C()
 

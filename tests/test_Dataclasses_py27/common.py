@@ -30,7 +30,7 @@ import funcsigs
 from collections import OrderedDict
 from contextlib import contextmanager
 import sys
-a = field()
+
 @contextmanager
 def expose_to_test(*classes):
     saved = []
@@ -49,13 +49,13 @@ def expose_to_test(*classes):
 
 
 
-def _2_or_3(for_2, for_3):
+def choose_2_or_3(for_2, for_3):
     if six.PY2:
         return for_2
     elif six.PY3:
         return for_3
 
-aa = field()
+#aa = field()
 # import typing
 # if typing.TYPE_CHECKING:
 #     a = field()
@@ -74,7 +74,9 @@ from typing import ClassVar
 try:
     import abc.ABC as ABC
 except ImportError:
-    from _py2dataclasses.abc_utils import ABC as ABC
+    from _py2dataclasses import abc_utils as __abc_utils
+    #import __abc_utils.ABC as ABC
+    ABC = __abc_utils.ABC
 #sys.modules["dataclasses"] = dataclasses
 #import unittest2 as unittest
 # Try to expose typing.get_type_hints for tests that expect it; if unavailable
@@ -92,4 +94,7 @@ import types
 import typing
 import weakref
 # Just any custom exception we can catch.
+if not getattr(unittest.TestCase, "assertRaisesRegexp", None):
+    unittest.TestCase.assertRaisesRegexp = unittest.TestCase.assertRaisesRegex
+#assertRaisesRegexp = getattr(unittest.TestCase, "assertRaisesRegex", getattr(unittest.TestCase, "assertRaisesRegexp", None))
 class CustomError(Exception): pass
