@@ -20,7 +20,7 @@ class CV(object):
     cv1 = dataclasses.field(typing.ClassVar, 30)
     cv2 = T_CV2
     cv3 = T_CV3
-    not_cv4 = dataclasses.field('T_CV4')  # string type → not recognized as ClassVar
+    not_cv4 = dataclasses.field('T_CV4')  # string type -> not recognized as ClassVar
 
 @dataclasses.dataclass
 class IV(object):
@@ -29,4 +29,4 @@ class IV(object):
     iv1 = dataclasses.field(dataclasses.InitVar)
     iv2 = dataclasses.field(T_IV2)
     iv3 = dataclasses.field(T_IV3)
-    not_iv4 = dataclasses.field('T_IV4')  # string type → not recognized as InitVar
+    not_iv4 = dataclasses.field('T_IV4')  # string type -> not recognized as InitVar

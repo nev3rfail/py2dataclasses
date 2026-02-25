@@ -23,6 +23,7 @@ path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.append(path)
 from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
+import dataclasses
 
 import unittest2 as unittest
 import pickle
@@ -31,8 +32,7 @@ import types
 import weakref
 # Just any custom exception we can catch.
 class CustomError(Exception): pass
-class ABC(abc.ABC):
-    pass
+ABC = abc.ABC if hasattr(abc, 'ABC') else abc.ABCMeta('ABC', (object,), {'__slots__': ()})
 class TestCase(unittest.TestCase):
     def assertNotHasAttr(self, obj, name):
         self.assertFalse(hasattr(obj, name),
@@ -542,6 +542,7 @@ class TestCase(unittest.TestCase):
         self.assertTrue(is_dataclass(d.d))
         self.assertFalse(is_dataclass(d.e))
 
+    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_0_field_compare(self):
         # Ensure that order=False is the default.
         @dataclass
@@ -905,6 +906,7 @@ class TestCase(unittest.TestCase):
         for name in builtins_names:
             self.assertEqual(getattr(c, name), name)
 
+    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_1_field_compare(self):
         # Ensure that order=False is the default.
         @dataclass
@@ -938,6 +940,7 @@ class TestCase(unittest.TestCase):
         self.assertTrue(C(1) >= C(0))
         self.assertTrue(C(1) >= C(1))
 
+    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_compare_subclasses(self):
         # Comparisons fail for subclasses, even if no fields
         #  are added.
@@ -1059,7 +1062,7 @@ class TestCase(unittest.TestCase):
         self.assertNotEqual(Point3D(1, 2, 3), (1, 2, 3))
 
         # Make sure we can't unpack.
-        with self.assertRaisesRegexp(TypeError, "(cannot unpack non-iterable|'Point3D' object is not iterable).*Point3D"):
+        with self.assertRaisesRegexp(TypeError, "'Point3D' object is not iterable|cannot unpack non-iterable Point3D"):
             x, y, z = Point3D(4, 5, 6)
 
         # Make sure another class with the same field names isn't
@@ -1582,6 +1585,7 @@ class TestCase(unittest.TestCase):
         c = C(10, 11, 50, 51)
         self.assertEqual(vars(c), {'x': 21, 'y': 101})
 
+    @unittest.skipIf(sys.version_info < (3,), "property overwrites Field descriptor on Python 2")
     def test_init_var_name_shadowing(self):
         # Shadowing an InitVar with a property
         
@@ -2047,8 +2051,10 @@ class TestCase(unittest.TestCase):
         try:
             fields(object)
         except TypeError as exc:
-            s =traceback.format_exc(10)
-            print(s if isinstance(s, str) else s.decode("utf-8"), file=stdout)
+            s = traceback.format_exc(10)
+            if not isinstance(s, type(u'')):
+                s = s.decode("utf-8")
+            print(s, file=stdout)
             #traceback.print_exception(type(exc), exc, sys.exc_info()[2], file=stdout)
         printed_traceback = stdout.getvalue()
         self.assertNotIn("AttributeError", printed_traceback)
@@ -2071,6 +2077,7 @@ class TestCase(unittest.TestCase):
             class C(object):
                 x = field(ClassVar[int], default_factory=int)
 
+    @unittest.skipIf(sys.version_info < (3,), "types.GenericAlias not available on Python 2")
     def test_is_dataclass_genericalias(self):
 
         @dataclass
@@ -4266,6 +4273,7 @@ class TestStringAnnotations(unittest.TestCase):
                     # won't exist on the instance.
                     self.assertNotIn('not_iv4', c.__dict__)
 
+    @unittest.skipIf(sys.version_info < (3,), "Python 3 annotation syntax")
     def test_text_annotations(self):
         from .dataclass_textanno import Bar, Foo
 

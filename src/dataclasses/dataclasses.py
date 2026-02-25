@@ -66,7 +66,9 @@ def _get_annotations(cls):
             return _annotationlib.get_annotations(cls, format=_annotationlib.Format.FORWARDREF)
         except Exception:
             return {}
-    return getattr(cls, '__annotations__', {})
+    # Use cls.__dict__ to get only OWN annotations, not inherited via MRO.
+    # On Python 2, getattr() would return parent annotations, breaking derived classes.
+    return cls.__dict__.get('__annotations__', {})
 
 class DataclassInstance(typing.Protocol):
     __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, Field[typing.Any]]]
@@ -227,9 +229,16 @@ class Field(object):
         self.repr = repr
         self.hash = hash
         self.compare = compare
-        self.metadata = (_EMPTY_METADATA
-                         if metadata is None else
-                         MappingProxyType(metadata))
+        if metadata is None:
+            self.metadata = _EMPTY_METADATA
+        else:
+            try:
+                self.metadata = MappingProxyType(metadata)
+            except TypeError:
+                if hasattr(metadata, '__getitem__') and hasattr(metadata, '__len__'):
+                    self.metadata = metadata
+                else:
+                    raise
         self.kw_only = kw_only
         self.doc = doc
         self._field_type = None
@@ -346,7 +355,7 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     # In mode=1 (py27 descriptor mode), if the first positional arg is a plain
     # value rather than a type annotation, reclassify it as the default value.
     # This allows field(20) to mean "default=20, type=int" instead of "type=20".
-    if mode == 1 and _typ is not MISSING and default is MISSING:
+    if mode == 1 and _typ is not MISSING and default is MISSING and default_factory is MISSING:
         _is_annotation = (
             isinstance(_typ, type)
             or hasattr(_typ, '__origin__')
@@ -355,6 +364,9 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
             or isinstance(_typ, InitVar)
             or (hasattr(typing, '_SpecialForm')
                 and isinstance(_typ, typing._SpecialForm))
+            # Python 2 typing backport: ClassVar[int] has type typing.ClassVar
+            or (hasattr(typing, 'ClassVar')
+                and type(_typ) is type(typing.ClassVar))
         )
         if not _is_annotation:
             default = _typ
@@ -493,7 +505,7 @@ class _FuncBuilder(object):
 
         # Now that we've generated the functions, assign them into cls.
         for name, fn in zip(self.names, fns):
-            fn.__qualname__ = '{0}.{1}'.format(cls.__qualname__, fn.__name__)
+            fn.__qualname__ = '{0}.{1}'.format(cls.__qualname__ if sys.version_info >= (3,) else cls.__name__, fn.__name__)
 
             # Apply method annotations if stored.
             if name in self.method_annotations:
@@ -637,9 +649,30 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
 
     _init_params = [_init_param(f) for f in std_fields]
     if kw_only_fields:
-        # Add the keyword-only args.
-        _init_params += ['*']
-        _init_params += [_init_param(f) for f in kw_only_fields]
+        if sys.version_info >= (3,):
+            # Add the keyword-only args.
+            _init_params += ['*']
+            _init_params += [_init_param(f) for f in kw_only_fields]
+        else:
+            # Python 2: emulate keyword-only with **kwargs
+            _init_params.append('**__kw_only_kwargs__')
+            kw_extraction = []
+            for f in kw_only_fields:
+                if f.default is MISSING and f.default_factory is MISSING:
+                    kw_extraction.append(
+                        '  if "{0}" not in __kw_only_kwargs__: '
+                        'raise TypeError("__init__() missing keyword-only argument: \'{0}\'")'.format(f.name))
+                    kw_extraction.append('  {0}=__kw_only_kwargs__.pop("{0}")'.format(f.name))
+                elif f.default_factory is not MISSING:
+                    kw_extraction.append(
+                        '  {0}=__kw_only_kwargs__.pop("{0}", __dataclass_HAS_DEFAULT_FACTORY__)'.format(f.name))
+                else:
+                    kw_extraction.append(
+                        '  {0}=__kw_only_kwargs__.pop("{0}", __dataclass_dflt_{0}__)'.format(f.name))
+            kw_extraction.append(
+                '  if __kw_only_kwargs__: raise TypeError('
+                '"__init__() got unexpected keyword arguments: " + ", ".join(__kw_only_kwargs__))')
+            body_lines = kw_extraction + body_lines
     return func_builder.add_fn('__init__',
                         [self_name] + _init_params,
                         body_lines,
@@ -673,14 +706,17 @@ def _frozen_get_del_attr(cls, fields, func_builder):
 
 def _is_classvar(a_type, typing):
     return (a_type is typing.ClassVar or type(a_type) == type(typing.ClassVar)
-            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar))
+            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar)
+            or (hasattr(a_type, '__origin__') and
+                getattr(a_type, '__origin__', None) is typing.ClassVar))
 
 
 def _is_initvar(a_type, dataclasses):
     # The module we're checking against is the module we're
     # currently in (dataclasses.py).
     return (a_type is dataclasses.InitVar
-            or type(a_type) is dataclasses.InitVar)
+            or type(a_type) is dataclasses.InitVar
+            or (isinstance(a_type, type) and issubclass(a_type, dataclasses.InitVar)))
 
 
 def _is_kw_only(a_type, dataclasses):
@@ -982,7 +1018,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
         #if flds:
         body = ['  return "{0}({1})".format({2})'.format(
-            cls.__qualname__,
+            cls.__qualname__ if sys.version_info >= (3,) else cls.__name__,
             repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
             ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
         ).replace(".format()", "")]
@@ -1028,6 +1064,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
+
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
 
@@ -1041,6 +1078,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
+    if sys.version_info < (3,):
+        cls.__qualname__ = qualname(cls)
     # Set the class doc-string only if it's None, matching CPython behavior.
     if cls.__doc__ is None:
         try:
@@ -1048,9 +1087,13 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             if _annotationlib is not None:
                 sig_kwargs['annotation_format'] = _annotationlib.Format.FORWARDREF
             text_sig = str(inspect.signature(cls, **sig_kwargs)).replace(' -> None', '')
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             text_sig = ''
-        cls.__doc__ = cls.__name__ + text_sig
+        try:
+            cls.__doc__ = cls.__name__ + text_sig
+        except (TypeError, AttributeError):
+            # Python 2: __doc__ is not writable on type objects
+            pass
 
     if match_args:
         _set_new_attribute(cls, '__match_args__',
@@ -1090,7 +1133,7 @@ def _get_slots(cls):
             yield slot
     elif isinstance(slots_val, str):
         yield slots_val
-    elif hasattr(slots_val, '__iter__') and not hasattr(slots_val, '__next__'):
+    elif hasattr(slots_val, '__iter__') and not (hasattr(slots_val, '__next__') or hasattr(slots_val, 'next')):
         for slot in slots_val:
             yield slot
     else:
@@ -1179,8 +1222,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
             for k, v in cls_dict.items():
                 ns[k] = v
         newcls = types.new_class(cls.__name__, bases, {}, exec_body)
-    except TypeError:
-        # Fallback for edge cases where types.new_class fails
+    except (TypeError, AttributeError):
+        # Fallback for edge cases where types.new_class fails or doesn't exist (Python 2)
         newcls = type(cls)(cls.__name__, bases, cls_dict)
 
     if qualname is not None and getattr(newcls, "__qualname__", None):
@@ -1239,9 +1282,12 @@ def annotate(__annotations__, **kwargs):
     if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
-        if hasattr(f, '__annotations__'):
+        # Use f.__dict__ to check for OWN annotations, not inherited via MRO.
+        # On Python 2, hasattr() follows MRO and would modify parent's annotations.
+        own_ann = f.__dict__.get('__annotations__')
+        if own_ann is not None:
             for k, v in kwargs.items():
-                f.__annotations__[k] = v
+                own_ann[k] = v
         else:
             setattr(f, "__annotations__", OrderedDict(kwargs))
         return f
@@ -1294,7 +1340,10 @@ def fields(class_or_instance):
     try:
         fields = getattr(class_or_instance, _FIELDS)
     except AttributeError:
-        raise TypeError('must be called with a dataclass type or instance') from None
+        exc = TypeError('must be called with a dataclass type or instance')
+        exc.__cause__ = None
+        exc.__suppress_context__ = True
+        raise exc
 
     # Exclude pseudo-fields.
     return tuple(f for f in fields.values() if f._field_type is _FIELD)
@@ -1312,7 +1361,9 @@ def is_dataclass(obj):
     return hasattr(cls, _FIELDS)
 
 
-def asdict(obj, dict_factory=dict):
+_default_dict_factory = dict if sys.version_info >= (3, 7) else OrderedDict
+
+def asdict(obj, dict_factory=_default_dict_factory):
     """Return the fields of a dataclass instance as a new dictionary mapping
     field names to field values.
 
@@ -1545,9 +1596,14 @@ def make_dataclass(
 
     # Create the class (use types.new_class for proper MRO resolution
     # with generic bases like Parent[int])
-    def exec_body(ns):
-        ns.update(namespace)
-    cls = types.new_class(cls_name, bases, {}, exec_body)
+    try:
+        def exec_body(ns):
+            ns.update(namespace)
+        cls = types.new_class(cls_name, bases, {}, exec_body)
+    except (TypeError, AttributeError):
+        # Fallback when types.new_class doesn't exist (Python 2) or fails
+        namespace['__annotations__'] = annotations
+        cls = type(cls_name, tuple(bases), namespace)
 
     if _annotationlib is not None:
         cls.__annotate__ = annotate_method

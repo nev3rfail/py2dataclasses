@@ -20,7 +20,7 @@ class CV(object):
     cv1 = field(ClassVar, 30)
     cv2 = T_CV2
     cv3 = T_CV3
-    not_cv4 = field('T_CV4')  # string type → not recognized as ClassVar
+    not_cv4 = field('T_CV4')  # string type -> not recognized as ClassVar
 
 @dataclass
 class IV(object):
@@ -29,4 +29,4 @@ class IV(object):
     iv1 = field(InitVar)
     iv2 = field(T_IV2)
     iv3 = field(T_IV3)
-    not_iv4 = field('T_IV4')  # string type → not recognized as InitVar
+    not_iv4 = field('T_IV4')  # string type -> not recognized as InitVar
