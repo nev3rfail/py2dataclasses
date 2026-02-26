@@ -1,1 +1,0 @@
-This is contents of `cpython-3.14.zip\cpython-3.14\Lib\test\test_dataclasses\`

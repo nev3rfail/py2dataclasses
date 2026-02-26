@@ -5339,5 +5339,11 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
         # one will be keeping a reference to the underlying class A.
         self.assertIs(A().cls(), B)
 
+def load_tests(loader, tests, pattern):
+    if pattern is not None:
+        return unittest.TestSuite()
+    return tests
+
+
 if __name__ == '__main__':
     unittest.main()

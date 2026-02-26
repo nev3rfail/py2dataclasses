@@ -16,9 +16,12 @@ from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
 from .class_utils import is_descriptor, qualname
-from dictproxyhack import dictproxy
+if sys.version_info >= (3,):
+    from types import MappingProxyType
+else:
+    from dictproxyhack import dictproxy
+    MappingProxyType = dictproxy
 import typing
-MappingProxyType = dictproxy
 GenericAlias = type(typing.List[int])
 
 try:
@@ -723,6 +726,83 @@ def _is_kw_only(a_type, dataclasses):
     return a_type is dataclasses.KW_ONLY
 
 
+# ---------------------------------------------------------------------------
+# Type introspection helpers for load/loads validation
+# ---------------------------------------------------------------------------
+
+def _get_type_origin(tp):
+    """Get the origin of a generic type.
+    List[int] -> list, Dict[str, int] -> dict, Optional[int] -> Union.
+    Returns None for non-generic types.
+    """
+    return getattr(tp, '__origin__', None)
+
+
+def _get_type_args(tp):
+    """Get the type arguments of a generic type.
+    List[int] -> (int,), Dict[str, int] -> (str, int).
+    Returns () for non-generic types.
+    """
+    return getattr(tp, '__args__', ()) or ()
+
+
+def _is_optional(tp):
+    """If tp is Optional[X] (Union[X, None]), return X. Otherwise return None."""
+    origin = _get_type_origin(tp)
+    if origin is typing.Union:
+        args = _get_type_args(tp)
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1 and type(None) in args:
+            return non_none[0]
+    return None
+
+
+def _origin_is(origin, builtin_type):
+    """Check if a type origin matches a builtin type, handling Py2/Py3 typing compat."""
+    if origin is builtin_type:
+        return True
+    _mapping = {list: 'List', dict: 'Dict', tuple: 'Tuple', set: 'Set', frozenset: 'FrozenSet'}
+    typing_name = _mapping.get(builtin_type)
+    if typing_name:
+        return origin is getattr(typing, typing_name, None)
+    return False
+
+
+def _resolve_type(tp, type_vars):
+    """Substitute TypeVars in a type annotation using the type_vars mapping.
+
+    Examples with type_vars={T: int}:
+        T           -> int
+        List[T]     -> List[int]
+        Dict[str,T] -> Dict[str, int]
+        Tuple[T,T]  -> Tuple[int, int]
+        Optional[T] -> Optional[int]
+        int         -> int (unchanged)
+    """
+    if not type_vars:
+        return tp
+
+    # Direct TypeVar match
+    if isinstance(tp, typing.TypeVar):
+        return type_vars.get(tp, tp)
+
+    # Generic type with args -- recurse into args
+    origin = _get_type_origin(tp)
+    args = _get_type_args(tp)
+    if origin is not None and args:
+        new_args = tuple(_resolve_type(a, type_vars) for a in args)
+        if new_args != args:
+            # Rebuild the generic type with resolved args
+            # Use origin[new_args] for typing generics
+            try:
+                if len(new_args) == 1:
+                    return origin[new_args[0]]
+                return origin[new_args]
+            except TypeError:
+                return tp
+    return tp
+
+
 def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
     # Given a type annotation string, does it refer to a_type in a_module?
     match = _MODULE_IDENTIFIER_RE.match(annotation)
@@ -1008,6 +1088,31 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
 
     _set_new_attribute(cls, '__replace__', _replace)
+
+    # Add load/loads classmethods and dump/dumps instance methods.
+    def _cls_load(klass, data, strict=False, type_vars=None):
+        return load(klass, data, strict=strict, type_vars=type_vars)
+    _cls_load.__name__ = 'load'
+    _cls_load.__doc__ = 'Create an instance from a dictionary with type validation.'
+    _set_new_attribute(cls, 'load', classmethod(_cls_load))
+
+    def _cls_loads(klass, json_string, strict=False, type_vars=None):
+        return loads(klass, json_string, strict=strict, type_vars=type_vars)
+    _cls_loads.__name__ = 'loads'
+    _cls_loads.__doc__ = 'Create an instance from a JSON string with type validation.'
+    _set_new_attribute(cls, 'loads', classmethod(_cls_loads))
+
+    def _inst_dump(self, dict_factory=_default_dict_factory):
+        return dump(self, dict_factory=dict_factory)
+    _inst_dump.__name__ = 'dump'
+    _inst_dump.__doc__ = 'Serialize this instance to a dictionary.'
+    _set_new_attribute(cls, 'dump', _inst_dump)
+
+    def _inst_dumps(self, **json_kwargs):
+        return dumps(self, **json_kwargs)
+    _inst_dumps.__name__ = 'dumps'
+    _inst_dumps.__doc__ = 'Serialize this instance to a JSON string.'
+    _set_new_attribute(cls, 'dumps', _inst_dumps)
 
     # Get the fields as a list, and include only real fields.
     field_list = [f for f in fields.values() if f._field_type is _FIELD]
@@ -1679,3 +1784,298 @@ def _replace(self, **changes):
 
     # Create the new object
     return self.__class__(**changes)
+
+
+# ---------------------------------------------------------------------------
+# Validation and deserialization (load / loads / dump / dumps)
+# ---------------------------------------------------------------------------
+
+def _validate_and_convert(value, expected_type, field_name, path):
+    """Validate that value matches expected_type and convert nested structures.
+
+    Returns the (possibly converted) value.
+    Raises TypeError with a descriptive message on type mismatch.
+    """
+    full_path = "{0}.{1}".format(path, field_name) if path else field_name
+
+    # No type annotation or MISSING -- skip validation
+    if expected_type is None or expected_type is MISSING:
+        return value
+
+    # Unresolved TypeVar -- validate bound/constraints if present, else accept anything
+    if isinstance(expected_type, typing.TypeVar):
+        bound = getattr(expected_type, '__bound__', None)
+        constraints = getattr(expected_type, '__constraints__', ())
+        if bound is not None:
+            # TypeVar('T', bound=Base) -- value must be instanceof bound
+            return _validate_and_convert(value, bound, field_name, path)
+        if constraints:
+            # TypeVar('T', int, str) -- value must match one of the constraints
+            for ct in constraints:
+                try:
+                    return _validate_and_convert(value, ct, field_name, path)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any constraint of {2}".format(
+                    full_path, value, expected_type))
+        return value
+
+    # typing.Any -- accept anything
+    # In Python 2.7 typing backport, field() may store a different AnyMeta instance
+    if expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta':
+        return value
+
+    # Handle None value
+    if value is None:
+        inner = _is_optional(expected_type)
+        if inner is not None or expected_type is type(None):
+            return None
+        raise TypeError(
+            "Field '{0}' expected {1}, got None".format(full_path, expected_type))
+
+    # Unwrap Optional[X] -> X (None was already handled above)
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        expected_type = inner
+
+    # Nested dataclass -- convert dict to instance recursively
+    if isinstance(expected_type, type) and hasattr(expected_type, _FIELDS):
+        if isinstance(value, dict):
+            return _load_inner(expected_type, value, full_path)
+        elif isinstance(value, expected_type):
+            return value
+        else:
+            raise TypeError(
+                "Field '{0}' expected dict or {1}, got {2}".format(
+                    full_path, expected_type.__name__, type(value).__name__))
+
+    # Generic types
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        # List[X]
+        if _origin_is(origin, list):
+            if not isinstance(value, list):
+                raise TypeError(
+                    "Field '{0}' expected list, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return [_validate_and_convert(v, args[0], "{0}[{1}]".format(field_name, i), path)
+                        for i, v in enumerate(value)]
+            return list(value)
+
+        # Dict[K, V]
+        if _origin_is(origin, dict):
+            if not isinstance(value, dict):
+                raise TypeError(
+                    "Field '{0}' expected dict, got {1}".format(
+                        full_path, type(value).__name__))
+            if args and len(args) == 2:
+                return {
+                    _validate_and_convert(k, args[0], "{0}{{key}}".format(field_name), path):
+                    _validate_and_convert(v, args[1], "{0}[{1}]".format(field_name, k), path)
+                    for k, v in value.items()
+                }
+            return dict(value)
+
+        # Tuple[X, Y, ...]
+        if _origin_is(origin, tuple):
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(
+                    "Field '{0}' expected list or tuple, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                if len(args) != len(value):
+                    raise TypeError(
+                        "Field '{0}' expected tuple of length {1}, got {2}".format(
+                            full_path, len(args), len(value)))
+                return tuple(
+                    _validate_and_convert(v, t, "{0}[{1}]".format(field_name, i), path)
+                    for i, (v, t) in enumerate(zip(value, args)))
+            return tuple(value)
+
+        # Set[X]
+        if _origin_is(origin, set):
+            if not isinstance(value, (list, set)):
+                raise TypeError(
+                    "Field '{0}' expected list or set, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return set(
+                    _validate_and_convert(v, args[0], "{0}{{{1}}}".format(field_name, i), path)
+                    for i, v in enumerate(value))
+            return set(value)
+
+        # Union[X, Y, ...] (non-Optional, since Optional was handled above)
+        if origin is typing.Union:
+            for variant in args:
+                try:
+                    return _validate_and_convert(value, variant, field_name, path)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any variant of {2}".format(
+                    full_path, value, expected_type))
+
+        # Unknown generic -- pass through
+        return value
+
+    # Plain types (int, str, float, bool, etc.)
+    if isinstance(expected_type, type):
+        # Strict: bool is NOT accepted as int
+        if expected_type is int and type(value) is bool:
+            raise TypeError(
+                "Field '{0}' expected int, got bool".format(full_path))
+        # Allow int -> float coercion (JSON has no float/int distinction)
+        if expected_type is float and isinstance(value, int) and not isinstance(value, bool):
+            return float(value)
+        # Python 2: accept unicode for str and vice versa (JSON returns unicode)
+        check_type = expected_type
+        if sys.version_info < (3,) and expected_type is str:
+            check_type = basestring
+        if not isinstance(value, check_type):
+            raise TypeError(
+                "Field '{0}' expected {1}, got {2} (value: {3!r})".format(
+                    full_path, expected_type.__name__, type(value).__name__, value))
+        return value
+
+    # Unrecognized type -- pass through without validation
+    return value
+
+
+def _infer_type_vars(cls):
+    """Infer TypeVar -> concrete type mappings from class hierarchy.
+
+    If cls inherits from a generic parent (e.g. IntBox(Box[int])),
+    we can extract the mapping {T: int} from __orig_bases__.
+    """
+    result = {}
+    for base in getattr(cls, '__orig_bases__', ()):
+        origin = getattr(base, '__origin__', None)
+        args = getattr(base, '__args__', None)
+        if origin is not None and args:
+            params = getattr(origin, '__parameters__', ())
+            for param, arg in zip(params, args):
+                if isinstance(param, typing.TypeVar) and not isinstance(arg, typing.TypeVar):
+                    result[param] = arg
+    return result
+
+
+def _load_inner(cls, data, path="", strict=False, type_vars=None):
+    """Recursively construct a dataclass instance from a dict."""
+    if not isinstance(data, dict):
+        raise TypeError(
+            "Expected dict for {0}, got {1}".format(
+                cls.__name__, type(data).__name__))
+
+    # Auto-infer TypeVar mappings from class hierarchy, merge with explicit type_vars
+    inferred = _infer_type_vars(cls)
+    if inferred:
+        if type_vars:
+            inferred.update(type_vars)  # explicit type_vars take precedence
+        type_vars = inferred
+
+    all_fields = getattr(cls, _FIELDS)
+    kwargs = {}
+    known_keys = set()
+
+    for f in all_fields.values():
+        # Skip ClassVar fields but track the name for strict mode
+        if f._field_type is _FIELD_CLASSVAR:
+            known_keys.add(f.name)
+            continue
+
+        # Skip init=False fields
+        if not f.init:
+            if strict and f.name in data:
+                raise TypeError(
+                    "Field '{0}' has init=False and cannot be loaded".format(f.name))
+            known_keys.add(f.name)
+            continue
+
+        known_keys.add(f.name)
+
+        # For InitVar fields, extract the inner type for validation
+        field_type = f.type
+        if f._field_type is _FIELD_INITVAR and isinstance(f.type, type) and issubclass(f.type, InitVar):
+            # InitVar[int] has __parameters__ attribute with the inner type
+            field_type = getattr(f.type, '__parameters__', None) or f.type
+
+        # Resolve TypeVars if type_vars mapping is provided
+        if type_vars:
+            field_type = _resolve_type(field_type, type_vars)
+
+        if f.name in data:
+            value = data[f.name]
+            kwargs[f.name] = _validate_and_convert(value, field_type, f.name, path)
+        else:
+            # Use default or raise
+            if f.default is not MISSING:
+                kwargs[f.name] = f.default
+            elif f.default_factory is not MISSING:
+                kwargs[f.name] = f.default_factory()
+            else:
+                raise ValueError(
+                    "Missing required field '{0}' for {1}".format(f.name, cls.__name__))
+
+    # Check for extra keys
+    if strict:
+        extra = set(data.keys()) - known_keys
+        if extra:
+            raise TypeError(
+                "Unknown fields for {0}: {1}".format(
+                    cls.__name__, ', '.join(sorted(extra))))
+
+    return cls(**kwargs)
+
+
+def load(cls, data, strict=False, type_vars=None):
+    """Create a dataclass instance from a dictionary with type validation.
+
+    Args:
+        cls: A dataclass class.
+        data: A dictionary mapping field names to values.
+        strict: If True, raise TypeError on extra keys in data.
+        type_vars: Optional dict mapping TypeVars to concrete types,
+            e.g. {T: int} to resolve generic fields.
+
+    Returns:
+        An instance of cls.
+
+    Raises:
+        TypeError: If cls is not a dataclass, data is not a dict, or type validation fails.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(cls, type) or not hasattr(cls, _FIELDS):
+        raise TypeError("load() should be called on a dataclass type")
+    return _load_inner(cls, data, strict=strict, type_vars=type_vars)
+
+
+def loads(cls, json_string, strict=False, type_vars=None):
+    """Create a dataclass instance from a JSON string with type validation.
+
+    Args:
+        cls: A dataclass class.
+        json_string: A JSON string.
+        strict: If True, raise TypeError on extra keys.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        An instance of cls.
+    """
+    import json as _json
+    data = _json.loads(json_string)
+    return load(cls, data, strict=strict, type_vars=type_vars)
+
+
+def dump(obj, dict_factory=_default_dict_factory):
+    """Serialize a dataclass instance to a dictionary. Wrapper around asdict()."""
+    return asdict(obj, dict_factory=dict_factory)
+
+
+def dumps(obj, dict_factory=_default_dict_factory, **json_kwargs):
+    """Serialize a dataclass instance to a JSON string."""
+    import json as _json
+    return _json.dumps(asdict(obj, dict_factory=dict_factory), **json_kwargs)
