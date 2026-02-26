@@ -176,28 +176,28 @@ U = TypeVar('U')
 
 
 @dataclass
-class Box(object):
+class Box(Generic[T]):
     value = field(T)
 
 
 @dataclass
-class Pair(object):
+class Pair(Generic[T, U]):
     first = field(T)
     second = field(U)
 
 
 @dataclass
-class GenericList(object):
+class GenericList(Generic[T]):
     items = field(List[T])
 
 
 @dataclass
-class GenericDict(object):
+class GenericDict(Generic[T]):
     mapping = field(Dict[str, T])
 
 
 @dataclass
-class GenericNested(object):
+class GenericNested(Generic[T]):
     name = field(str)
     box = field(Box)
 
@@ -273,7 +273,7 @@ BoundT = TypeVar('BoundT', bound=Animal)
 
 
 @dataclass
-class Shelter(object):
+class Shelter(Generic[BoundT]):
     pet = field(BoundT)
 
 
@@ -281,7 +281,7 @@ BoundIntT = TypeVar('BoundIntT', bound=int)
 
 
 @dataclass
-class BoundIntBox(object):
+class BoundIntBox(Generic[BoundIntT]):
     value = field(BoundIntT)
 
 
@@ -291,12 +291,12 @@ CT = TypeVar('CT', int, str)
 
 
 @dataclass
-class ConstrainedBox(object):
+class ConstrainedBox(Generic[CT]):
     value = field(CT)
 
 
 @dataclass
-class ConstrainedList(object):
+class ConstrainedList(Generic[CT]):
     items = field(List[CT])
 
 
