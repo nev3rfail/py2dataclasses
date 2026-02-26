@@ -21,6 +21,8 @@ __all__ = ['dataclass',
            'loads',
            'dump',
            'dumps',
+           'validate',
+           'validates',
 
             '_oneshot',
             '_dataclass_getstate',
@@ -30,4 +32,4 @@ __all__ = ['dataclass',
 from .dataclasses import dataclass, field, Field, FrozenInstanceError, InitVar, KW_ONLY, MISSING, fields, asdict, \
     astuple, make_dataclass, replace, is_dataclass, of, _oneshot, \
     _dataclass_getstate, _dataclass_setstate, \
-    load, loads, dump, dumps
+    load, loads, dump, dumps, validate, validates

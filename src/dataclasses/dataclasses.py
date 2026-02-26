@@ -2079,3 +2079,44 @@ def dumps(obj, dict_factory=_default_dict_factory, **json_kwargs):
     """Serialize a dataclass instance to a JSON string."""
     import json as _json
     return _json.dumps(asdict(obj, dict_factory=dict_factory), **json_kwargs)
+
+
+def validate(cls, data, strict=False, type_vars=None):
+    """Validate a dictionary against a dataclass schema without creating an instance.
+
+    Args:
+        cls: A dataclass class.
+        data: A dictionary mapping field names to values.
+        strict: If True, raise TypeError on extra keys in data.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        True if validation passes.
+
+    Raises:
+        TypeError: If cls is not a dataclass, data is not a dict, or type validation fails.
+        ValueError: If required fields are missing.
+    """
+    load(cls, data, strict=strict, type_vars=type_vars)
+    return True
+
+
+def validates(cls, json_string, strict=False, type_vars=None):
+    """Validate a JSON string against a dataclass schema without creating an instance.
+
+    Args:
+        cls: A dataclass class.
+        json_string: A JSON string.
+        strict: If True, raise TypeError on extra keys.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        True if validation passes.
+
+    Raises:
+        TypeError: If type validation fails.
+        ValueError: If required fields are missing or JSON is invalid.
+    """
+    import json as _json
+    data = _json.loads(json_string)
+    return validate(cls, data, strict=strict, type_vars=type_vars)
