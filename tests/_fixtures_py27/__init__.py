@@ -38,6 +38,12 @@ import pickle
 import copy
 import types
 import weakref
+try:
+    import types.GenericAlias as GenericAlias
+except ImportError:
+    from _py2dataclasses import type_utils as __type_utils
+    #import __abc_utils.ABC as ABC
+    GenericAlias = __type_utils.GenericAlias
 
 # Just any custom exception we can catch.
 class CustomError(Exception): pass
@@ -980,7 +986,7 @@ class TestCase(unittest.TestCase):
                 with self.assertRaisesRegexp(TypeError,
                                              "not supported between instances of .'?B'? and .'?C'?"):
                     fn(B(0), C(0))
-    @unittest.skip("We have __lt__ and __gt__ everywhere to trigger a proper exception")
+    #@unittest.skip("We have __lt__ and __gt__ everywhere to trigger a proper exception")
     def test_eq_order(self):
         # Test combining eq and order.
         for (eq,    order, result   ) in [
@@ -2096,7 +2102,7 @@ class TestCase(unittest.TestCase):
     def test_is_dataclass_genericalias(self):
 
         @dataclass
-        class A(types.GenericAlias):
+        class A(GenericAlias):
             origin = field(type)
             args = field(type)
         self.assertTrue(is_dataclass(A))

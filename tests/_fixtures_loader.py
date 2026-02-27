@@ -24,8 +24,9 @@ def get_patchers(runtime, lib, tests):
     name = parse_testname(tests)
     print(name, runtime, lib, tests)
     if runtime == "py3" and lib == STANDARD and tests == STANDARD:
-        from . import _fixtures_compat_stdlib_to_backport
-        patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
+        #from . import _fixtures_compat_stdlib_to_backport
+        #patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
+        patch_sys, patch_mod = lambda: None, lambda mod: mod
     elif runtime == "py3" and lib == STANDARD and tests == BACKPORTED:
         from . import _fixtures_compat_stdlib_to_backport
         patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,

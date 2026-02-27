@@ -7,4 +7,4 @@ def import_fixture():
     return _fixtures_py314
 
 
-load_tests = make_load_tests("py2" if six.PY2 else six.PY3, "ported", "native", load=import_fixture)
+load_tests = make_load_tests("py2" if six.PY2 else "py3", "ported", "native", load=import_fixture)
