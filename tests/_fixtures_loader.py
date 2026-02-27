@@ -37,7 +37,7 @@ def get_patchers(runtime, lib, tests):
         patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
     elif (runtime == "py2" and lib == BACKPORTED and tests == BACKPORTED or (runtime == "py2" and lib == STANDARD and tests == BACKPORTED)):
         from . import _fixtures_compat_backport_to_stdlib
-        patch_sys, patch_mod = _fixtures_compat_backport_to_stdlib.patch_sys,_fixtures_compat_backport_to_stdlib.patch_module,
+        patch_sys, patch_mod = lambda: None, lambda mod: mod#_fixtures_compat_backport_to_stdlib.patch_sys,_fixtures_compat_backport_to_stdlib.patch_module,
     else:
         if lib == BACKPORTED:
             from . import _fixtures_compat_stdlib_to_backport

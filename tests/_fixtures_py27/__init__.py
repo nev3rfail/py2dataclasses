@@ -38,6 +38,7 @@ import pickle
 import copy
 import types
 import weakref
+
 # Just any custom exception we can catch.
 class CustomError(Exception): pass
 ABC = abc.ABC if hasattr(abc, 'ABC') else abc.ABCMeta('ABC', (object,), {'__slots__': ()})
@@ -550,7 +551,7 @@ class TestCase(unittest.TestCase):
         self.assertTrue(is_dataclass(d.d))
         self.assertFalse(is_dataclass(d.e))
 
-    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
+    #@unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_0_field_compare(self):
         # Ensure that order=False is the default.
         @dataclass
@@ -920,7 +921,7 @@ class TestCase(unittest.TestCase):
         for name in builtins_names:
             self.assertEqual(getattr(c, name), name)
 
-    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
+    #@unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_1_field_compare(self):
         # Ensure that order=False is the default.
         @dataclass
@@ -954,7 +955,7 @@ class TestCase(unittest.TestCase):
         self.assertTrue(C(1) >= C(0))
         self.assertTrue(C(1) >= C(1))
 
-    @unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
+    #@unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_compare_subclasses(self):
         # Comparisons fail for subclasses, even if no fields
         #  are added.
@@ -2091,7 +2092,7 @@ class TestCase(unittest.TestCase):
             class C(object):
                 x = field(ClassVar[int], default_factory=int)
 
-    @unittest.skipIf(sys.version_info < (3,), "types.GenericAlias not available on Python 2")
+    #@unittest.skipIf(sys.version_info < (3,), "types.GenericAlias not available on Python 2")
     def test_is_dataclass_genericalias(self):
 
         @dataclass
@@ -4287,7 +4288,7 @@ class TestStringAnnotations(unittest.TestCase):
                     # won't exist on the instance.
                     self.assertNotIn('not_iv4', c.__dict__)
 
-    @unittest.skipIf(sys.version_info < (3,), "Python 3 annotation syntax")
+    #@unittest.skipIf(sys.version_info < (3,), "Python 3 annotation syntax")
     def test_text_annotations(self):
         from .dataclass_textanno import Bar, Foo
 

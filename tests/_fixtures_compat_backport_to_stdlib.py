@@ -44,7 +44,7 @@ def _adapter_is_classvar(tp):
 
 
 def collect_annotations(cls):
-    items = {}
+    items = OrderedDict()
     for name, value in cls.__dict__.items():
         if isinstance(value, Field):
             t = value.type

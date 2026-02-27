@@ -72,10 +72,10 @@ def _get_annotations(cls):
         try:
             return _annotationlib.get_annotations(cls, format=_annotationlib.Format.FORWARDREF)
         except Exception:
-            return {}
+            return OrderedDict()
     # Use cls.__dict__ to get only OWN annotations, not inherited via MRO.
     # On Python 2, getattr() would return parent annotations, breaking derived classes.
-    return cls.__dict__.get('__annotations__', {})
+    return cls.__dict__.get('__annotations__', OrderedDict())
 
 
 class DataclassInstance(typing.Protocol):
@@ -542,7 +542,7 @@ class _FuncBuilder(object):
                 else:
                     annotations = OrderedDict()
                     # Get the field types from the class annotations
-                    cls_annotations = getattr(cls, '__annotations__', {})
+                    cls_annotations = getattr(cls, '__annotations__', OrderedDict())
                     for field_name in annotation_fields:
                         if field_name in cls_annotations:
                             annotations[field_name] = cls_annotations[field_name]
