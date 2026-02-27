@@ -16,10 +16,62 @@ from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
 from .class_utils import is_descriptor, qualname
-from dictproxyhack import dictproxy
+if sys.version_info >= (3,):
+    from types import MappingProxyType
+else:
+    from dictproxyhack import dictproxy
+    MappingProxyType = dictproxy
 import typing
-MappingProxyType = dictproxy
 GenericAlias = type(typing.List[int])
+
+try:
+    import annotationlib as _annotationlib
+except ImportError:
+    _annotationlib = None
+
+# Sentinel for make_dataclass to avoid eagerly importing typing.Any
+_ANY_MARKER = object()
+
+if _annotationlib is not None:
+    def _make_annotate_function(__class__, method_name, annotation_fields, return_type):
+        """Create an __annotate__ function for a generated dataclass method (PEP 649)."""
+        def __annotate__(format):
+            Format = _annotationlib.Format
+            if format in (Format.VALUE, Format.FORWARDREF, Format.STRING):
+                cls_annotations = {}
+                for base in reversed(__class__.__mro__):
+                    cls_annotations.update(
+                        _annotationlib.get_annotations(base, format=format))
+                new_annotations = OrderedDict()
+                for k in annotation_fields:
+                    # gh-142214: annotation may be missing in dynamic cases
+                    try:
+                        new_annotations[k] = cls_annotations[k]
+                    except KeyError:
+                        pass
+                if return_type is not MISSING:
+                    if format == Format.STRING:
+                        new_annotations["return"] = _annotationlib.type_repr(return_type)
+                    else:
+                        new_annotations["return"] = return_type
+                return new_annotations
+            else:
+                raise NotImplementedError(format)
+        __annotate__.__generated_by_dataclasses__ = True
+        __annotate__.__qualname__ = '{0}.{1}.__annotate__'.format(
+            __class__.__qualname__, method_name)
+        return __annotate__
+
+def _get_annotations(cls):
+    """Get class annotations safely, supporting deferred annotations (PEP 649)."""
+    if _annotationlib is not None:
+        try:
+            return _annotationlib.get_annotations(cls, format=_annotationlib.Format.FORWARDREF)
+        except Exception:
+            return {}
+    # Use cls.__dict__ to get only OWN annotations, not inherited via MRO.
+    # On Python 2, getattr() would return parent annotations, breaking derived classes.
+    return cls.__dict__.get('__annotations__', {})
 
 class DataclassInstance(typing.Protocol):
     __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, Field[typing.Any]]]
@@ -180,35 +232,45 @@ class Field(object):
         self.repr = repr
         self.hash = hash
         self.compare = compare
-        self.metadata = (_EMPTY_METADATA
-                         if metadata is None else
-                         MappingProxyType(metadata))
+        if metadata is None:
+            self.metadata = _EMPTY_METADATA
+        else:
+            try:
+                self.metadata = MappingProxyType(metadata)
+            except TypeError:
+                if hasattr(metadata, '__getitem__') and hasattr(metadata, '__len__'):
+                    self.metadata = metadata
+                else:
+                    raise
         self.kw_only = kw_only
         self.doc = doc
         self._field_type = None
 
     @recursive_repr()
     def __repr__(self):
-        return ('{12!s}<{1!s}>(name=({0!r}),' +
-            ('default={2!r},' if self.default is not MISSING else "") +
-            ('default_factory={3!r},' if self.default_factory is not MISSING else "") +
-            ('init={4!r},' if self.init else "" ) +
-            ('repr={5!r},' if self.repr else "" ) +
-            ('hash={6!r},' if self.hash else "" ) +
-            ('compare={7!r},' if self.compare else "" ) +
-            ('metadata={8!r},' if self.metadata else "" ) +
-            ('kw_only={9!r},' if self.kw_only else "" ) +
-            ('doc={10!r},' if self.doc else "" ) +
-            ('_field_type={11}' if self._field_type is not MISSING else "" ) +
-            ')').format(
-            self.name, getattr(self.type, "__name__", self.type.__class__.__name__), self.default, self.default_factory,
+        return ('Field('
+                'name={0!r},'
+                'type={1!r},'
+                'default={2!r},'
+                'default_factory={3!r},'
+                'init={4!r},'
+                'repr={5!r},'
+                'hash={6!r},'
+                'compare={7!r},'
+                'metadata={8!r},'
+                'kw_only={9!r},'
+                'doc={10!r},'
+                '_field_type={11})'
+                ).format(
+            self.name, self.type, self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
-            self.metadata, self.kw_only, self.doc, self._field_type, self.__class__.__module__ +"."+self.__class__.__name__)
+            self.metadata, self.kw_only, self.doc, self._field_type)
 
     def __set_name__(self, owner, name):
         func = getattr(type(self.default), '__set_name__', None)
         if func:
             func(self.default, owner, name)
+        self.name = name
 
     __class_getitem__ = classmethod(GenericAlias)
 
@@ -292,13 +354,35 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     :rtype: dataclasses.Field
     """
     mode = kwargs["mode"] if "mode" in kwargs else 1
+
+    # In mode=1 (py27 descriptor mode), if the first positional arg is a plain
+    # value rather than a type annotation, reclassify it as the default value.
+    # This allows field(20) to mean "default=20, type=int" instead of "type=20".
+    if mode == 1 and _typ is not MISSING and default is MISSING and default_factory is MISSING:
+        _is_annotation = (
+            isinstance(_typ, type)
+            or hasattr(_typ, '__origin__')
+            or isinstance(_typ, str)
+            or isinstance(_typ, typing.TypeVar)
+            or isinstance(_typ, InitVar)
+            or (hasattr(typing, '_SpecialForm')
+                and isinstance(_typ, typing._SpecialForm))
+            # Python 2 typing backport: ClassVar[int] has type typing.ClassVar
+            or (hasattr(typing, 'ClassVar')
+                and type(_typ) is type(typing.ClassVar))
+        )
+        if not _is_annotation:
+            default = _typ
+            _typ = type(default)
+
     f = _field(default, default_factory, init, repr, hash, compare,
                   metadata, kw_only, doc, _cls=_oneshot if mode == 1 else Field)
-    if _typ == MISSING and default != MISSING:
+    # In mode=1 (py27 descriptor mode), auto-infer type from default value
+    if mode == 1 and _typ is MISSING and default is not MISSING:
         _typ = type(default)
 
     #object.__setattr__(f, "_value_type", _typ)
-    f.type = _typ
+    f.type = _typ if _typ is not MISSING else None
     return f
 
 
@@ -424,7 +508,26 @@ class _FuncBuilder(object):
 
         # Now that we've generated the functions, assign them into cls.
         for name, fn in zip(self.names, fns):
-            fn.__qualname__ = '{0}.{1}'.format(cls.__name__, fn.__name__)
+            fn.__qualname__ = '{0}.{1}'.format(cls.__qualname__ if sys.version_info >= (3,) else cls.__name__, fn.__name__)
+
+            # Apply method annotations if stored.
+            if name in self.method_annotations:
+                ann_field_names, ret_type = self.method_annotations[name]
+                # Set __annotate__ for PEP 649 deferred evaluation
+                if _annotationlib is not None:
+                    fn.__annotate__ = _make_annotate_function(
+                        cls, name, ann_field_names, ret_type)
+                else:
+                    # Fallback: set __annotations__ directly
+                    annos = {}
+                    cls_fields = getattr(cls, _FIELDS, {})
+                    for field_name in ann_field_names:
+                        f = cls_fields.get(field_name)
+                        if f is not None and f.type is not MISSING:
+                            annos[field_name] = f.type
+                    if ret_type is not MISSING:
+                        annos['return'] = ret_type
+                    fn.__annotations__ = annos
 
             if self.unconditional_adds.get(name, False):
                 setattr(cls, name, fn)
@@ -549,9 +652,30 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
 
     _init_params = [_init_param(f) for f in std_fields]
     if kw_only_fields:
-        # Add the keyword-only args.
-        _init_params += ['*']
-        _init_params += [_init_param(f) for f in kw_only_fields]
+        if sys.version_info >= (3,):
+            # Add the keyword-only args.
+            _init_params += ['*']
+            _init_params += [_init_param(f) for f in kw_only_fields]
+        else:
+            # Python 2: emulate keyword-only with **kwargs
+            _init_params.append('**__kw_only_kwargs__')
+            kw_extraction = []
+            for f in kw_only_fields:
+                if f.default is MISSING and f.default_factory is MISSING:
+                    kw_extraction.append(
+                        '  if "{0}" not in __kw_only_kwargs__: '
+                        'raise TypeError("__init__() missing keyword-only argument: \'{0}\'")'.format(f.name))
+                    kw_extraction.append('  {0}=__kw_only_kwargs__.pop("{0}")'.format(f.name))
+                elif f.default_factory is not MISSING:
+                    kw_extraction.append(
+                        '  {0}=__kw_only_kwargs__.pop("{0}", __dataclass_HAS_DEFAULT_FACTORY__)'.format(f.name))
+                else:
+                    kw_extraction.append(
+                        '  {0}=__kw_only_kwargs__.pop("{0}", __dataclass_dflt_{0}__)'.format(f.name))
+            kw_extraction.append(
+                '  if __kw_only_kwargs__: raise TypeError('
+                '"__init__() got unexpected keyword arguments: " + ", ".join(__kw_only_kwargs__))')
+            body_lines = kw_extraction + body_lines
     return func_builder.add_fn('__init__',
                         [self_name] + _init_params,
                         body_lines,
@@ -571,32 +695,112 @@ def _frozen_get_del_attr(cls, fields, func_builder):
                         ('self', 'name', 'value'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
-                         '  super({0}, self).__setattr__(name, value)'.format(cls.__name__)),
+                         '  super(cls, self).__setattr__(name, value)'),
                         locals=locals,
                         overwrite_error=True))
     attach_debug_function(cls, *func_builder.add_fn('__delattr__',
                         ('self', 'name'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
-                         '  super({0}, self).__delattr__(name)'.format(cls.__name__)),
+                         '  super(cls, self).__delattr__(name)'),
                         locals=locals,
                         overwrite_error=True))
 
 
 def _is_classvar(a_type, typing):
     return (a_type is typing.ClassVar or type(a_type) == type(typing.ClassVar)
-            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar))
+            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar)
+            or (hasattr(a_type, '__origin__') and
+                getattr(a_type, '__origin__', None) is typing.ClassVar))
 
 
 def _is_initvar(a_type, dataclasses):
     # The module we're checking against is the module we're
     # currently in (dataclasses.py).
     return (a_type is dataclasses.InitVar
-            or type(a_type) is dataclasses.InitVar)
+            or type(a_type) is dataclasses.InitVar
+            or (isinstance(a_type, type) and issubclass(a_type, dataclasses.InitVar)))
 
 
 def _is_kw_only(a_type, dataclasses):
     return a_type is dataclasses.KW_ONLY
+
+
+# ---------------------------------------------------------------------------
+# Type introspection helpers for load/loads validation
+# ---------------------------------------------------------------------------
+
+def _get_type_origin(tp):
+    """Get the origin of a generic type.
+    List[int] -> list, Dict[str, int] -> dict, Optional[int] -> Union.
+    Returns None for non-generic types.
+    """
+    return getattr(tp, '__origin__', None)
+
+
+def _get_type_args(tp):
+    """Get the type arguments of a generic type.
+    List[int] -> (int,), Dict[str, int] -> (str, int).
+    Returns () for non-generic types.
+    """
+    return getattr(tp, '__args__', ()) or ()
+
+
+def _is_optional(tp):
+    """If tp is Optional[X] (Union[X, None]), return X. Otherwise return None."""
+    origin = _get_type_origin(tp)
+    if origin is typing.Union:
+        args = _get_type_args(tp)
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1 and type(None) in args:
+            return non_none[0]
+    return None
+
+
+def _origin_is(origin, builtin_type):
+    """Check if a type origin matches a builtin type, handling Py2/Py3 typing compat."""
+    if origin is builtin_type:
+        return True
+    _mapping = {list: 'List', dict: 'Dict', tuple: 'Tuple', set: 'Set', frozenset: 'FrozenSet'}
+    typing_name = _mapping.get(builtin_type)
+    if typing_name:
+        return origin is getattr(typing, typing_name, None)
+    return False
+
+
+def _resolve_type(tp, type_vars):
+    """Substitute TypeVars in a type annotation using the type_vars mapping.
+
+    Examples with type_vars={T: int}:
+        T           -> int
+        List[T]     -> List[int]
+        Dict[str,T] -> Dict[str, int]
+        Tuple[T,T]  -> Tuple[int, int]
+        Optional[T] -> Optional[int]
+        int         -> int (unchanged)
+    """
+    if not type_vars:
+        return tp
+
+    # Direct TypeVar match
+    if isinstance(tp, typing.TypeVar):
+        return type_vars.get(tp, tp)
+
+    # Generic type with args -- recurse into args
+    origin = _get_type_origin(tp)
+    args = _get_type_args(tp)
+    if origin is not None and args:
+        new_args = tuple(_resolve_type(a, type_vars) for a in args)
+        if new_args != args:
+            # Rebuild the generic type with resolved args
+            # Use origin[new_args] for typing generics
+            try:
+                if len(new_args) == 1:
+                    return origin[new_args[0]]
+                return origin[new_args]
+            except TypeError:
+                return tp
+    return tp
 
 
 def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
@@ -636,11 +840,14 @@ def _get_field(cls, a_name, a_type, default_kw_only):
         if isinstance(default, types.MemberDescriptorType):
             # This is a field in __slots__, so it has no default value.
             default = MISSING
-        f = field(default=default, _typ=a_type)
+        f = field(default=default, _typ=a_type, mode=0)
 
     # Only at this point do we know the name and the type.  Set them.
-    #f.name = a_name
-    f.__set_name__(cls, a_name)
+    # Only call __set_name__ for newly created fields (not ones that were
+    # already set as class attributes where Python already called __set_name__).
+    if f.name is None or f.name != a_name:
+        f.__set_name__(cls, a_name)
+    f.name = a_name
     f.type = a_type
 
     # Assume it's a normal field until proven otherwise.
@@ -716,7 +923,8 @@ def _hash_exception(cls, fields, func_builder):
 
 
 
-_hash_action = {(False, False, False, False): None,
+_hash_action = {#                (unsafe_hash, eq,    frozen, has_explicit_hash)
+                (False, False, False, False): None,
                 (False, False, False, True ): None,
                 (False, False, True,  False): None,
                 (False, False, True,  True ): None,
@@ -798,8 +1006,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             all_frozen_bases = all_frozen_bases and current_frozen
             any_frozen_base = any_frozen_base or current_frozen
 
-    # Get annotations - in Python 2.7 we expect this to be set by external lib
-    cls_annotations = getattr(cls, '__annotations__', OrderedDict())
+    # Get annotations - use safe accessor for deferred annotations (PEP 649)
+    cls_annotations = _get_annotations(cls)
 
     # Now find fields in our class.
     cls_fields = []
@@ -881,6 +1089,31 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     _set_new_attribute(cls, '__replace__', _replace)
 
+    # Add load/loads classmethods and dump/dumps instance methods.
+    def _cls_load(klass, data, strict=False, type_vars=None):
+        return load(klass, data, strict=strict, type_vars=type_vars)
+    _cls_load.__name__ = 'load'
+    _cls_load.__doc__ = 'Create an instance from a dictionary with type validation.'
+    _set_new_attribute(cls, 'load', classmethod(_cls_load))
+
+    def _cls_loads(klass, json_string, strict=False, type_vars=None):
+        return loads(klass, json_string, strict=strict, type_vars=type_vars)
+    _cls_loads.__name__ = 'loads'
+    _cls_loads.__doc__ = 'Create an instance from a JSON string with type validation.'
+    _set_new_attribute(cls, 'loads', classmethod(_cls_loads))
+
+    def _inst_dump(self, dict_factory=_default_dict_factory):
+        return dump(self, dict_factory=dict_factory)
+    _inst_dump.__name__ = 'dump'
+    _inst_dump.__doc__ = 'Serialize this instance to a dictionary.'
+    _set_new_attribute(cls, 'dump', _inst_dump)
+
+    def _inst_dumps(self, **json_kwargs):
+        return dumps(self, **json_kwargs)
+    _inst_dumps.__name__ = 'dumps'
+    _inst_dumps.__doc__ = 'Serialize this instance to a JSON string.'
+    _set_new_attribute(cls, 'dumps', _inst_dumps)
+
     # Get the fields as a list, and include only real fields.
     field_list = [f for f in fields.values() if f._field_type is _FIELD]
 
@@ -890,7 +1123,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
         #if flds:
         body = ['  return "{0}({1})".format({2})'.format(
-            cls.__name__,
+            cls.__qualname__ if sys.version_info >= (3,) else cls.__name__,
             repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
             ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
         ).replace(".format()", "")]
@@ -936,21 +1169,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
-    else:
-        # Mimic python 3's type errors while comparing different types
-        #flds = [f for f in field_list if f.compare]
-        #self_tuple = _tuple_str('self', flds)
-        #other_tuple = _tuple_str('other', flds)
-        for name, op in [('__lt__', '<'),
-                         ('__le__', '<='),
-                         ('__gt__', '>'),
-                         ('__ge__', '>=')]:
-            attach_debug_function(cls, *func_builder.add_fn(name,
-                                ('self', 'other'),
-                                ['  if other.__class__ is self.__class__:',
-                                 '   raise TypeError("not supported between instances")',
-                                 '  raise TypeError("not supported between instances of {} and {}".format(other.__class__.__name__, self.__class__.__name__))'],
-                                overwrite_error='not supported between instances'))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -961,24 +1179,26 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     bool(frozen),
     has_explicit_hash]
     if hash_action:
-        cls.__hash__ = hash_action(cls, field_list, func_builder)
+        hash_action(cls, field_list, func_builder)
 
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
-    cls.__qualname__ = qualname(cls)
-    doc_attr = getattr(cls, '__doc__')
-    if doc_attr is None:
-        doc_string = ""
-    else:
-        doc_string = cls.__doc__
-    # Create a class doc-string.
-    try:
-        text_sig = str(", ".join("{}: {!s}".format(k, t.__name__) for k, t in cls.__annotations__.items())).replace(' -> None', '')
-    except (TypeError, ValueError, AttributeError):
-        text_sig = ''
-    doc_string = cls.__name__ + text_sig + doc_string
-    if doc_attr is not None:
-        cls.__doc__ = doc_string
+    if sys.version_info < (3,):
+        cls.__qualname__ = qualname(cls)
+    # Set the class doc-string only if it's None, matching CPython behavior.
+    if cls.__doc__ is None:
+        try:
+            sig_kwargs = {}
+            if _annotationlib is not None:
+                sig_kwargs['annotation_format'] = _annotationlib.Format.FORWARDREF
+            text_sig = str(inspect.signature(cls, **sig_kwargs)).replace(' -> None', '')
+        except (TypeError, ValueError, AttributeError):
+            text_sig = ''
+        try:
+            cls.__doc__ = cls.__name__ + text_sig
+        except (TypeError, AttributeError):
+            # Python 2: __doc__ is not writable on type objects
+            pass
 
     if match_args:
         _set_new_attribute(cls, '__match_args__',
@@ -1018,7 +1238,7 @@ def _get_slots(cls):
             yield slot
     elif isinstance(slots_val, str):
         yield slots_val
-    elif hasattr(slots_val, '__iter__') and not hasattr(slots_val, '__next__'):
+    elif hasattr(slots_val, '__iter__') and not (hasattr(slots_val, '__next__') or hasattr(slots_val, 'next')):
         for slot in slots_val:
             yield slot
     else:
@@ -1071,9 +1291,17 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     if '__slots__' in cls.__dict__:
         raise TypeError('{0} already specifies __slots__'.format(cls.__name__))
 
+    # gh-135228: Clear type descriptors so the original class can be GC'd.
+    if hasattr(sys, '_clear_type_descriptors'):
+        sys._clear_type_descriptors(cls)
+
     # Create a new dict for our new class.
     cls_dict = dict(cls.__dict__)
     field_names = tuple(f.name for f in fields(cls))
+
+    # Filter stale descriptors that will be recreated by the new class.
+    cls_dict.pop('__weakref__', None)
+    cls_dict.pop('__dict__', None)
 
     # Make sure slots don't overlap with those in base classes.
     inherited_slots = set()
@@ -1089,10 +1317,26 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
 
     # And finally create the class.
     qualname = getattr(cls, '__qualname__', getattr(cls, '__name__', None))
-    newcls = type(cls)(cls.__name__, cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__, cls_dict)
+    if typing.Generic in cls.__bases__:
+        bases = cls.__orig_bases__
+    else:
+        bases = cls.__bases__
+
+    try:
+        def exec_body(ns):
+            for k, v in cls_dict.items():
+                ns[k] = v
+        newcls = types.new_class(cls.__name__, bases, {}, exec_body)
+    except (TypeError, AttributeError):
+        # Fallback for edge cases where types.new_class fails or doesn't exist (Python 2)
+        newcls = type(cls)(cls.__name__, bases, cls_dict)
 
     if qualname is not None and getattr(newcls, "__qualname__", None):
             newcls.__qualname__ = qualname
+
+    # gh-135228: Copy __firstlineno__ so GC-based class identity checks work.
+    if hasattr(cls, '__firstlineno__'):
+        newcls.__firstlineno__ = cls.__firstlineno__
 
     if is_frozen:
         # Need this for pickling frozen classes with slots.
@@ -1116,9 +1360,23 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
                 break
 
     # Fix references in dataclass Fields
-    for f in getattr(newcls, _FIELDS).values():
-        # In Python 2.7, we don't have sophisticated annotation handling
-        pass
+    if _annotationlib is not None:
+        newcls_ann = _annotationlib.get_annotations(
+            newcls, format=_annotationlib.Format.FORWARDREF)
+        for f in getattr(newcls, _FIELDS).values():
+            try:
+                ann = newcls_ann[f.name]
+            except KeyError:
+                pass
+            else:
+                f.type = ann
+
+    # Fix the class reference in the __annotate__ method
+    init = newcls.__init__
+    init_annotate = getattr(init, '__annotate__', None)
+    if init_annotate is not None:
+        if getattr(init_annotate, '__generated_by_dataclasses__', False):
+            _update_func_cell_for__class__(init_annotate, cls, newcls)
 
     return newcls
 
@@ -1129,9 +1387,12 @@ def annotate(__annotations__, **kwargs):
     if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
     def dec(f):
-        if hasattr(f, '__annotations__'):
+        # Use f.__dict__ to check for OWN annotations, not inherited via MRO.
+        # On Python 2, hasattr() follows MRO and would modify parent's annotations.
+        own_ann = f.__dict__.get('__annotations__')
+        if own_ann is not None:
             for k, v in kwargs.items():
-                f.__annotations__[k] = v
+                own_ann[k] = v
         else:
             setattr(f, "__annotations__", OrderedDict(kwargs))
         return f
@@ -1155,11 +1416,10 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     """
 
     def wrap(cls):
-        annotations = collect_annotations(cls)
-        if annotations:
-            annotate(__annotations__=annotations)(cls)
-        else:
-            annotate(__annotations__={})(cls)
+        if not _get_annotations(cls):
+            annotations = collect_annotations(cls)
+            if annotations:
+                annotate(__annotations__=annotations)(cls)
 
         return _process_class(cls, init, repr, eq, order, unsafe_hash,
                               frozen, match_args, kw_only, slots,
@@ -1185,7 +1445,10 @@ def fields(class_or_instance):
     try:
         fields = getattr(class_or_instance, _FIELDS)
     except AttributeError:
-        raise TypeError('must be called with a dataclass type or instance')
+        exc = TypeError('must be called with a dataclass type or instance')
+        exc.__cause__ = None
+        exc.__suppress_context__ = True
+        raise exc
 
     # Exclude pseudo-fields.
     return tuple(f for f in fields.values() if f._field_type is _FIELD)
@@ -1203,7 +1466,9 @@ def is_dataclass(obj):
     return hasattr(cls, _FIELDS)
 
 
-def asdict(obj, dict_factory=OrderedDict):
+_default_dict_factory = dict if sys.version_info >= (3, 7) else OrderedDict
+
+def asdict(obj, dict_factory=_default_dict_factory):
     """Return the fields of a dataclass instance as a new dictionary mapping
     field names to field values.
 
@@ -1381,7 +1646,7 @@ def make_dataclass(
     for item in fields:
         if isinstance(item, str):
             name = item
-            tp = _ANY_MARKER
+            tp = _ANY_MARKER if _annotationlib is not None else typing.Any
         elif len(item) == 2:
             name, tp = item
         elif len(item) == 3:
@@ -1402,10 +1667,51 @@ def make_dataclass(
 
     # Update namespace
     namespace.update(defaults)
-    namespace['__annotations__'] = annotations
+    if _annotationlib is None:
+        namespace['__annotations__'] = annotations
 
-    # Create the class
-    cls = type(cls_name, bases, namespace)
+    # Build __annotate__ for lazy typing.Any resolution (PEP 649)
+    if _annotationlib is not None:
+        _saved_annotations = OrderedDict(annotations)
+        value_blocked = [True]  # mutable for closure
+
+        def annotate_method(format):
+            def get_any():
+                if format == _annotationlib.Format.STRING:
+                    return 'typing.Any'
+                elif format == _annotationlib.Format.FORWARDREF:
+                    _typing = sys.modules.get("typing")
+                    if _typing is None:
+                        return _annotationlib.ForwardRef("Any", module="typing")
+                    else:
+                        return _typing.Any
+                elif format == _annotationlib.Format.VALUE:
+                    if value_blocked[0]:
+                        raise NotImplementedError
+                    from typing import Any
+                    return Any
+                else:
+                    raise NotImplementedError
+            annos = OrderedDict()
+            for ann, t in _saved_annotations.items():
+                annos[ann] = get_any() if t is _ANY_MARKER else t
+            if format == _annotationlib.Format.STRING:
+                return _annotationlib.annotations_to_string(annos)
+            return annos
+
+    # Create the class (use types.new_class for proper MRO resolution
+    # with generic bases like Parent[int])
+    try:
+        def exec_body(ns):
+            ns.update(namespace)
+        cls = types.new_class(cls_name, bases, {}, exec_body)
+    except (TypeError, AttributeError):
+        # Fallback when types.new_class doesn't exist (Python 2) or fails
+        namespace['__annotations__'] = annotations
+        cls = type(cls_name, tuple(bases), namespace)
+
+    if _annotationlib is not None:
+        cls.__annotate__ = annotate_method
 
     # Set module
     if module is None:
@@ -1421,6 +1727,12 @@ def make_dataclass(
                     unsafe_hash=unsafe_hash, frozen=frozen,
                     match_args=match_args, kw_only=kw_only, slots=slots,
                     weakref_slot=weakref_slot)
+
+    # Unblock VALUE format AFTER decorator processing
+    # (decorator's _process_class calls get_annotations which tries VALUE first)
+    if _annotationlib is not None:
+        value_blocked[0] = False
+
     return cls
 
 
@@ -1460,9 +1772,351 @@ def _replace(self, **changes):
             continue
 
         if f.name not in changes:
-            if f._field_type is _FIELD_INITVAR and f.default is MISSING:
-                raise TypeError("InitVar {0!r} must be specified with replace()".format(f.name))
-            changes[f.name] = getattr(self, f.name)
+            if f._field_type is _FIELD_INITVAR:
+                if f.default is MISSING and f.default_factory is MISSING:
+                    raise TypeError("InitVar {0!r} must be specified with replace()".format(f.name))
+                elif f.default is not MISSING:
+                    changes[f.name] = f.default
+                else:
+                    changes[f.name] = f.default_factory()
+            else:
+                changes[f.name] = getattr(self, f.name)
 
     # Create the new object
     return self.__class__(**changes)
+
+
+# ---------------------------------------------------------------------------
+# Validation and deserialization (load / loads / dump / dumps)
+# ---------------------------------------------------------------------------
+
+def _validate_and_convert(value, expected_type, field_name, path):
+    """Validate that value matches expected_type and convert nested structures.
+
+    Returns the (possibly converted) value.
+    Raises TypeError with a descriptive message on type mismatch.
+    """
+    full_path = "{0}.{1}".format(path, field_name) if path else field_name
+
+    # No type annotation or MISSING -- skip validation
+    if expected_type is None or expected_type is MISSING:
+        return value
+
+    # Unresolved TypeVar -- validate bound/constraints if present, else accept anything
+    if isinstance(expected_type, typing.TypeVar):
+        bound = getattr(expected_type, '__bound__', None)
+        constraints = getattr(expected_type, '__constraints__', ())
+        if bound is not None:
+            # TypeVar('T', bound=Base) -- value must be instanceof bound
+            return _validate_and_convert(value, bound, field_name, path)
+        if constraints:
+            # TypeVar('T', int, str) -- value must match one of the constraints
+            for ct in constraints:
+                try:
+                    return _validate_and_convert(value, ct, field_name, path)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any constraint of {2}".format(
+                    full_path, value, expected_type))
+        return value
+
+    # typing.Any -- accept anything
+    # In Python 2.7 typing backport, field() may store a different AnyMeta instance
+    if expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta':
+        return value
+
+    # Handle None value
+    if value is None:
+        inner = _is_optional(expected_type)
+        if inner is not None or expected_type is type(None):
+            return None
+        raise TypeError(
+            "Field '{0}' expected {1}, got None".format(full_path, expected_type))
+
+    # Unwrap Optional[X] -> X (None was already handled above)
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        expected_type = inner
+
+    # Nested dataclass -- convert dict to instance recursively
+    if isinstance(expected_type, type) and hasattr(expected_type, _FIELDS):
+        if isinstance(value, dict):
+            return _load_inner(expected_type, value, full_path)
+        elif isinstance(value, expected_type):
+            return value
+        else:
+            raise TypeError(
+                "Field '{0}' expected dict or {1}, got {2}".format(
+                    full_path, expected_type.__name__, type(value).__name__))
+
+    # Generic types
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        # List[X]
+        if _origin_is(origin, list):
+            if not isinstance(value, list):
+                raise TypeError(
+                    "Field '{0}' expected list, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return [_validate_and_convert(v, args[0], "{0}[{1}]".format(field_name, i), path)
+                        for i, v in enumerate(value)]
+            return list(value)
+
+        # Dict[K, V]
+        if _origin_is(origin, dict):
+            if not isinstance(value, dict):
+                raise TypeError(
+                    "Field '{0}' expected dict, got {1}".format(
+                        full_path, type(value).__name__))
+            if args and len(args) == 2:
+                return {
+                    _validate_and_convert(k, args[0], "{0}{{key}}".format(field_name), path):
+                    _validate_and_convert(v, args[1], "{0}[{1}]".format(field_name, k), path)
+                    for k, v in value.items()
+                }
+            return dict(value)
+
+        # Tuple[X, Y, ...]
+        if _origin_is(origin, tuple):
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(
+                    "Field '{0}' expected list or tuple, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                if len(args) != len(value):
+                    raise TypeError(
+                        "Field '{0}' expected tuple of length {1}, got {2}".format(
+                            full_path, len(args), len(value)))
+                return tuple(
+                    _validate_and_convert(v, t, "{0}[{1}]".format(field_name, i), path)
+                    for i, (v, t) in enumerate(zip(value, args)))
+            return tuple(value)
+
+        # Set[X]
+        if _origin_is(origin, set):
+            if not isinstance(value, (list, set)):
+                raise TypeError(
+                    "Field '{0}' expected list or set, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return set(
+                    _validate_and_convert(v, args[0], "{0}{{{1}}}".format(field_name, i), path)
+                    for i, v in enumerate(value))
+            return set(value)
+
+        # Union[X, Y, ...] (non-Optional, since Optional was handled above)
+        if origin is typing.Union:
+            for variant in args:
+                try:
+                    return _validate_and_convert(value, variant, field_name, path)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any variant of {2}".format(
+                    full_path, value, expected_type))
+
+        # Unknown generic -- pass through
+        return value
+
+    # Plain types (int, str, float, bool, etc.)
+    if isinstance(expected_type, type):
+        # Strict: bool is NOT accepted as int
+        if expected_type is int and type(value) is bool:
+            raise TypeError(
+                "Field '{0}' expected int, got bool".format(full_path))
+        # Allow int -> float coercion (JSON has no float/int distinction)
+        if expected_type is float and isinstance(value, int) and not isinstance(value, bool):
+            return float(value)
+        # Python 2: accept unicode for str and vice versa (JSON returns unicode)
+        check_type = expected_type
+        if sys.version_info < (3,) and expected_type is str:
+            check_type = basestring
+        if not isinstance(value, check_type):
+            raise TypeError(
+                "Field '{0}' expected {1}, got {2} (value: {3!r})".format(
+                    full_path, expected_type.__name__, type(value).__name__, value))
+        return value
+
+    # Unrecognized type -- pass through without validation
+    return value
+
+
+def _infer_type_vars(cls):
+    """Infer TypeVar -> concrete type mappings from class hierarchy.
+
+    If cls inherits from a generic parent (e.g. IntBox(Box[int])),
+    we can extract the mapping {T: int} from __orig_bases__.
+    """
+    result = {}
+    for base in getattr(cls, '__orig_bases__', ()):
+        origin = getattr(base, '__origin__', None)
+        args = getattr(base, '__args__', None)
+        if origin is not None and args:
+            params = getattr(origin, '__parameters__', ())
+            for param, arg in zip(params, args):
+                if isinstance(param, typing.TypeVar) and not isinstance(arg, typing.TypeVar):
+                    result[param] = arg
+    return result
+
+
+def _load_inner(cls, data, path="", strict=False, type_vars=None):
+    """Recursively construct a dataclass instance from a dict."""
+    if not isinstance(data, dict):
+        raise TypeError(
+            "Expected dict for {0}, got {1}".format(
+                cls.__name__, type(data).__name__))
+
+    # Auto-infer TypeVar mappings from class hierarchy, merge with explicit type_vars
+    inferred = _infer_type_vars(cls)
+    if inferred:
+        if type_vars:
+            inferred.update(type_vars)  # explicit type_vars take precedence
+        type_vars = inferred
+
+    all_fields = getattr(cls, _FIELDS)
+    kwargs = {}
+    known_keys = set()
+
+    for f in all_fields.values():
+        # Skip ClassVar fields but track the name for strict mode
+        if f._field_type is _FIELD_CLASSVAR:
+            known_keys.add(f.name)
+            continue
+
+        # Skip init=False fields
+        if not f.init:
+            if strict and f.name in data:
+                raise TypeError(
+                    "Field '{0}' has init=False and cannot be loaded".format(f.name))
+            known_keys.add(f.name)
+            continue
+
+        known_keys.add(f.name)
+
+        # For InitVar fields, extract the inner type for validation
+        field_type = f.type
+        if f._field_type is _FIELD_INITVAR and isinstance(f.type, type) and issubclass(f.type, InitVar):
+            # InitVar[int] has __parameters__ attribute with the inner type
+            field_type = getattr(f.type, '__parameters__', None) or f.type
+
+        # Resolve TypeVars if type_vars mapping is provided
+        if type_vars:
+            field_type = _resolve_type(field_type, type_vars)
+
+        if f.name in data:
+            value = data[f.name]
+            kwargs[f.name] = _validate_and_convert(value, field_type, f.name, path)
+        else:
+            # Use default or raise
+            if f.default is not MISSING:
+                kwargs[f.name] = f.default
+            elif f.default_factory is not MISSING:
+                kwargs[f.name] = f.default_factory()
+            else:
+                raise ValueError(
+                    "Missing required field '{0}' for {1}".format(f.name, cls.__name__))
+
+    # Check for extra keys
+    if strict:
+        extra = set(data.keys()) - known_keys
+        if extra:
+            raise TypeError(
+                "Unknown fields for {0}: {1}".format(
+                    cls.__name__, ', '.join(sorted(extra))))
+
+    return cls(**kwargs)
+
+
+def load(cls, data, strict=False, type_vars=None):
+    """Create a dataclass instance from a dictionary with type validation.
+
+    Args:
+        cls: A dataclass class.
+        data: A dictionary mapping field names to values.
+        strict: If True, raise TypeError on extra keys in data.
+        type_vars: Optional dict mapping TypeVars to concrete types,
+            e.g. {T: int} to resolve generic fields.
+
+    Returns:
+        An instance of cls.
+
+    Raises:
+        TypeError: If cls is not a dataclass, data is not a dict, or type validation fails.
+        ValueError: If required fields are missing.
+    """
+    if not isinstance(cls, type) or not hasattr(cls, _FIELDS):
+        raise TypeError("load() should be called on a dataclass type")
+    return _load_inner(cls, data, strict=strict, type_vars=type_vars)
+
+
+def loads(cls, json_string, strict=False, type_vars=None):
+    """Create a dataclass instance from a JSON string with type validation.
+
+    Args:
+        cls: A dataclass class.
+        json_string: A JSON string.
+        strict: If True, raise TypeError on extra keys.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        An instance of cls.
+    """
+    import json as _json
+    data = _json.loads(json_string)
+    return load(cls, data, strict=strict, type_vars=type_vars)
+
+
+def dump(obj, dict_factory=_default_dict_factory):
+    """Serialize a dataclass instance to a dictionary. Wrapper around asdict()."""
+    return asdict(obj, dict_factory=dict_factory)
+
+
+def dumps(obj, dict_factory=_default_dict_factory, **json_kwargs):
+    """Serialize a dataclass instance to a JSON string."""
+    import json as _json
+    return _json.dumps(asdict(obj, dict_factory=dict_factory), **json_kwargs)
+
+
+def validate(cls, data, strict=False, type_vars=None):
+    """Validate a dictionary against a dataclass schema without creating an instance.
+
+    Args:
+        cls: A dataclass class.
+        data: A dictionary mapping field names to values.
+        strict: If True, raise TypeError on extra keys in data.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        True if validation passes.
+
+    Raises:
+        TypeError: If cls is not a dataclass, data is not a dict, or type validation fails.
+        ValueError: If required fields are missing.
+    """
+    load(cls, data, strict=strict, type_vars=type_vars)
+    return True
+
+
+def validates(cls, json_string, strict=False, type_vars=None):
+    """Validate a JSON string against a dataclass schema without creating an instance.
+
+    Args:
+        cls: A dataclass class.
+        json_string: A JSON string.
+        strict: If True, raise TypeError on extra keys.
+        type_vars: Optional dict mapping TypeVars to concrete types.
+
+    Returns:
+        True if validation passes.
+
+    Raises:
+        TypeError: If type validation fails.
+        ValueError: If required fields are missing or JSON is invalid.
+    """
+    import json as _json
+    data = _json.loads(json_string)
+    return validate(cls, data, strict=strict, type_vars=type_vars)

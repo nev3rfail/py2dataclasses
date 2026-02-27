@@ -1,5 +1,5 @@
-
-USING_STRINGS = True
+#from __future__ import annotations
+USING_STRINGS = False
 
 # dataclass_module_2.py and dataclass_module_2_str.py are identical
 # except only the latter uses string annotations.
@@ -20,13 +20,13 @@ class CV(object):
     cv1 = field(ClassVar, 30)
     cv2 = T_CV2
     cv3 = T_CV3
-    not_cv4 = T_CV4  # When using string annotations, this field is not recognized as a ClassVar.
+    not_cv4 = field(T_CV4)  # type=ClassVar -> recognized as ClassVar
 
 @dataclass
 class IV(object):
-    T_IV4 = field(InitVar)
+    T_IV4 = InitVar
     iv0 = field(InitVar[int])
-    iv1=  field(InitVar)
-    iv2= field(T_IV2)
-    iv3= field(T_IV3)
-    not_iv4= T_IV4  # When using string annotations, this field is not recognized as an InitVar.
+    iv1 = field(InitVar)
+    iv2 = field(T_IV2)
+    iv3 = field(T_IV3)
+    not_iv4 = field(T_IV4)  # type=InitVar -> recognized as InitVar
