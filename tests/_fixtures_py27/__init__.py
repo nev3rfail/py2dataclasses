@@ -4590,20 +4590,6 @@ class TestFrozen(unittest.TestCase):
         self.assertEqual(C(10).x, 20)
 
 
-
-
-
-
-def load_tests(loader, tests, pattern):
-    # When called by discover (pattern is not None), return empty suite
-    # to prevent discover from collecting these tests directly.
-    # The compat adapter files (test_compat_*.py) load these via loadTestsFromModule
-    # which passes pattern=None.
-    if pattern is not None:
-        return unittest.TestSuite()
-    return tests
-
-
 if __name__ == '__main__':
     unittest.main()
 

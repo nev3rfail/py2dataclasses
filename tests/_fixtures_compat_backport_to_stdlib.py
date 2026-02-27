@@ -1,7 +1,3 @@
-"""Run _fixtures_py27_py314 tests against stdlib dataclasses on Python 3.14.
-
-Adapts py2dataclasses field(type) syntax to stdlib field() via monkey-patching.
-"""
 import sys
 import typing
 from collections import OrderedDict
@@ -77,7 +73,7 @@ def annotate(__annotations__, **kwargs):
 
 
 def _dataclass_adapter(cls, *args, **kwargs):
-    if not cls.__annotations__:
+    if not cls.__dict__.get("__annotations__", {}):
         ann = collect_annotations(cls)
         if ann:
             annotate(ann)(cls)
@@ -107,9 +103,7 @@ def asdict_adapter(obj, dict_factory=OrderedDict):
     return asdict(obj, dict_factory=dict_factory)
 
 
-def load_tests(loader, tests, pattern):
-    mod = __import__("_fixtures_py27_py314")
-
+def patch_module(mod):
     object.__setattr__(mod, "_real_field", mod.field)
     object.__setattr__(mod, "field", field_adapter)
     object.__setattr__(mod, "_real_dataclass", mod.dataclass)
@@ -117,27 +111,13 @@ def load_tests(loader, tests, pattern):
     object.__setattr__(mod, "asdict", asdict_adapter)
     object.__setattr__(mod, "dataclasses", _stdlib_dataclasses)
 
-    _stdlib_dataclasses.field = field_adapter
-    _stdlib_dataclasses.dataclass = dataclass_adapter
 
     object.__setattr__(mod, "_oneshot", Field)
 
-    _skip_tests = {
-        'test_default_value',
-        'test_no_default_value',
-        'test_init_var_name_shadowing',
-    }
-    for cls_name in dir(mod):
-        cls_obj = getattr(mod, cls_name, None)
-        if isinstance(cls_obj, type) and issubclass(cls_obj, unittest.TestCase):
-            for skip_name in _skip_tests:
-                method = getattr(cls_obj, skip_name, None)
-                if method is not None:
-                    setattr(cls_obj, skip_name,
-                            unittest.skip("py2-specific: incompatible with stdlib adapter")(method))
+def patch_sys():
+    _stdlib_dataclasses.field = field_adapter
+    _stdlib_dataclasses.dataclass = dataclass_adapter
+    pass
 
-    return loader.loadTestsFromModule(mod)
-
-
-if __name__ == '__main__':
-    unittest.main()
+def load_tests(loader, tests, pattern):
+    pass

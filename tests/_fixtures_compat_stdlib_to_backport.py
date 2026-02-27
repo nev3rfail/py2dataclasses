@@ -1,7 +1,3 @@
-"""Run _fixtures_py314 (CPython 3.14 stdlib) tests through py2dataclasses.
-
-Patches the fixture module to use our library instead of stdlib dataclasses.
-"""
 import sys
 import os
 import unittest
@@ -36,7 +32,7 @@ def dataclass_adapter(cls=None, /, *, init=True, repr=True, eq=True, order=False
         return _dataclass_adapter(cls, **kwargs)
 
 
-def patch_test(target_module):
+def patch_module(target_module):
     field_list = ('fields', 'field', 'Field', 'dataclass', 'is_dataclass', 'replace',
                   'make_dataclass', 'asdict', 'astuple', 'FrozenInstanceError', 'MISSING',
                   '_oneshot', 'InitVar', 'KW_ONLY')
@@ -48,12 +44,12 @@ def patch_test(target_module):
             target_module.__setattr__(one, getattr(py2dataclasses, one))
     target_module.__setattr__('dataclasses', py2dataclasses)
 
+_old = None
 
-def load_tests(loader, tests, pattern):
-    mod = __import__("_fixtures_py314")
-    patch_test(mod)
-    return loader.loadTestsFromModule(mod)
+def patch_sys():
+    _old = sys.modules.pop("dataclasses", None)
+    sys.modules["dataclasses"] = py2dataclasses
 
-
-if __name__ == '__main__':
-    unittest.main()
+def unpatch_sys():
+    if _old:
+        sys.modules["dataclasses"] = _old
