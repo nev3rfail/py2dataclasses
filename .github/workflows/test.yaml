@@ -46,5 +46,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ matrix.tox-env }}.xml
           name: ${{ matrix.tox-env }}
-          flags: ${{ matrix.python-version }}, ${{ matrix.tox-env }}
+          flags: ${{ matrix.tox-env }}
           slug: nev3rfail/py2dataclasses
