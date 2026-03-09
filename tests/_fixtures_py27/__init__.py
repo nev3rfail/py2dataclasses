@@ -2813,7 +2813,7 @@ class TestReplace(unittest.TestCase):
         c.f = c
         self.assertIn("C(f=..., g=1)", repr(c))
 
-
+@unittest.skipIf(six.PY2, "Python 2.7 can't append __doc__ to objects and classes.")
 class TestDocString(unittest.TestCase):
     def assertDocStrEqual(self, a, b):
         # Because 3.6 and 3.7 differ in how inspect.signature work
@@ -2898,6 +2898,7 @@ class TestDocString(unittest.TestCase):
     def test_docstring_deque_field(self):
         @dataclass
         class C(object):
+            """a"""
             x = field(deque)
 
         self.assertDocStrEqual(C.__doc__, "C(x:collections.deque)")
@@ -4705,7 +4706,7 @@ class TestStringAnnotations(unittest.TestCase):
                     # won't exist on the instance.
                     self.assertNotIn('not_iv4', c.__dict__)
 
-    #@unittest.skipIf(sys.version_info < (3,), "Python 3 annotation syntax")
+    @unittest.skipIf(six.PY2, "Python 2.7 don't have annotations.")
     def test_text_annotations(self):
         from .dataclass_textanno import Bar, Foo
 
