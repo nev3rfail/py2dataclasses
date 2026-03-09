@@ -25,4 +25,6 @@
 
 
 # The agent log goes here:
-- ...
+- Step 1: Added exception handling for Python 2/3 compatibility in `fields()` function to properly set `__suppress_context__` only on Python 3.3+
+- Step 2: Ensured all exception messages are consistent between Py2 and Py3 versions
+- Step 3: FrozenInstanceError properly inherits from AttributeError in both versions

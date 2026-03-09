@@ -972,7 +972,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     all_frozen_bases = None
     has_dataclass_bases = False
     if not  hasattr(cls, "__mro__"):
-        raise Exception("dataclasses shound be new styule classes") #fixme correct exception
+        if six.PY2:
+            raise TypeError("dataclasses should be new style classes")
+        else:
+            raise TypeError("dataclasses should be new style classes")
     for b in cls.__mro__[-1:0:-1]:
         base_fields = getattr(b, _FIELDS, None)
         if base_fields is not None:
@@ -1477,9 +1480,13 @@ def fields(class_or_instance):
     try:
         fields = getattr(class_or_instance, _FIELDS)
     except AttributeError:
-        exc = TypeError('must be called with a dataclass type or instance')
+        if six.PY2:
+            exc = TypeError('must be called with a dataclass type or instance')
+        else:
+            exc = TypeError('must be called with a dataclass type or instance')
         exc.__cause__ = None
-        exc.__suppress_context__ = True
+        if hasattr(exc, '__suppress_context__'):
+            exc.__suppress_context__ = True
         raise exc
 
     # Exclude pseudo-fields.
