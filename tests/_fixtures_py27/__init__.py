@@ -24,9 +24,14 @@ from collections import OrderedDict
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.append(path)
-from dataclasses import fields, field, Field, _oneshot, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses
+
+try:
+    from dataclasses import _oneshot
+except:
+    from dataclasses import Field as _oneshot
 
 try:
     import unittest2 as unittest
@@ -2564,7 +2569,7 @@ class TestReplace(unittest.TestCase):
         c.f = c
         self.assertIn("C(f=..., g=1)", repr(c))
 
-@unittest.skip
+
 class TestDocString(unittest.TestCase):
     def assertDocStrEqual(self, a, b):
         # Because 3.6 and 3.7 differ in how inspect.signature work
@@ -4301,7 +4306,7 @@ class TestStringAnnotations(unittest.TestCase):
 
         # Skip this test as it requires get_type_hints functionality
         # that may not be fully compatible in Python 2.7
-        pass
+        raise #pass
 
 class TestFrozen(unittest.TestCase):
     def test_inherit_frozen_mutliple_inheritance(self):
