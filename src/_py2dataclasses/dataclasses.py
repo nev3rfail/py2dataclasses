@@ -319,6 +319,7 @@ InitVar = make_alias("InitVar", "T")
 # Instances of Field are only ever created from within this module,
 # and only from the field() function, although Field instances are
 # exposed externally as (conceptually) read-only objects.
+T = typing.TypeVar("T")
 class _Field(object):
     """"""
     _counter = 0
@@ -342,6 +343,7 @@ class _Field(object):
         self.order = _Field._counter
         _Field._counter += 1
         self.name = None  # type: typing.Optional[str]
+        self.type = MISSING # type: T
         self.default = default
         self.default_factory = default_factory
         self.init = init  # type: bool
@@ -408,6 +410,42 @@ class _Field(object):
         func = getattr(type(self.default), '__set_name__', None)
         if func:
             func(self.default, owner, name)
+        self.name = name
+
+
+
+
+class Field(_Field):
+    def __get__(self, instance, owner):
+        if hasattr(self.default, "__get__"):
+            v = self.default.__get__(instance, owner)
+        else:
+            if not instance:
+                v = self
+            elif self.name and hasattr(instance, self.name):
+                v = object.__getattribute__(self, self.name)
+            else:
+                v = self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(
+                    AttributeError, "object has no attribute {}".format(self.name))
+                # v = (self.default if self.default is not MISSING
+                #      else self.default_factory() if self.default_factory is not MISSING
+                # else throw(AttributeError, "object has no attribute {}".format(self.name)))
+        return v
+
+    def __set__(self, instance, value):
+        if hasattr(self.default, "__set__"):
+            # descriptor
+            self.default.__set__(instance, value)
+        elif hasattr(type(self.default), "__set__"):
+            # descriptor
+            type(self.default).__set__(instance, value)
+        elif self.default is value:
+            pass
+        else:
+            raise RuntimeError()
+
+    def __set_name__(self, owner, name):
+        _Field.__set_name__(self, owner, name)
         self.name = name
 
 
@@ -484,11 +522,11 @@ def of(_typ):
     return _typ
 
 
-T = typing.TypeVar("T")
-
-
+def _cast(any, _typ):
+    # type: (typing.Any, typing.Type[T]) -> T
+    return any
 def field(
-        _typ,  # type: typing.Type[T]
+        _typ=MISSING,  # type: typing.Type[T]
         default=MISSING,  # type: typing.Union[T, _MISSING_TYPE]
         default_factory=MISSING,  # type: typing.Union[typing.Callable[[], T], _MISSING_TYPE]
         init=True,  # type: bool
@@ -510,40 +548,6 @@ def field(
 
 def throw(e, m):
     raise e(m)
-
-
-class Field(_Field):
-    def __get__(self, instance, owner):
-        if hasattr(self.default, "__get__"):
-            v = self.default.__get__(instance, owner)
-        else:
-            if not instance:
-                v = self
-            elif self.name and hasattr(instance, self.name):
-                v = object.__getattribute__(self, self.name)
-            else:
-                v = self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(
-                    AttributeError, "object has no attribute {}".format(self.name))
-                # v = (self.default if self.default is not MISSING
-                #      else self.default_factory() if self.default_factory is not MISSING
-                # else throw(AttributeError, "object has no attribute {}".format(self.name)))
-        return v
-
-    def __set__(self, instance, value):
-        if hasattr(self.default, "__set__"):
-            # descriptor
-            self.default.__set__(instance, value)
-        elif hasattr(type(self.default), "__set__"):
-            # descriptor
-            type(self.default).__set__(instance, value)
-        elif self.default is value:
-            pass
-        else:
-            raise RuntimeError()
-
-    def __set_name__(self, owner, name):
-        _Field.__set_name__(self, owner, name)
-        self.name = name
 
 
 def _fields_in_init_order(fields):

@@ -41,6 +41,30 @@ class GenericAlias(object):
         return '{0}.{1}[{2}]'.format(self.__class__.__module__, self.__class__.__name__, type_name)
 #f = typing.GenericMeta
 
+def _generic_new(base_cls, cls, *args, **kwds):
+    # Assure type is erased on instantiation,
+    # but attempt to store it in __orig_class__
+    if cls.__origin__ is None:
+        if (base_cls.__new__ is object.__new__ and
+                cls.__init__ is not object.__init__):
+            return base_cls.__new__(cls)
+        else:
+            return base_cls.__new__(cls, *args, **kwds)
+    else:
+        origin = cls._gorg
+        if (base_cls.__new__ is object.__new__ and
+                cls.__init__ is not object.__init__):
+            obj = base_cls.__new__(origin)
+        else:
+            obj = base_cls.__new__(origin, *args, **kwds)
+        try:
+            obj.__orig_class__ = cls
+        except AttributeError:
+            pass
+        obj.__init__(*args, **kwds)
+        return obj
+
+
 def make_alias(name, * _types, **kwargs):
     if "module" in kwargs:
         module = kwargs["module"]

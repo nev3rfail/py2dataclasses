@@ -854,7 +854,7 @@ class TestCase(unittest.TestCase):
         self.assertNotIn('x', D.__dict__)
 
     def test_field_repr(self):
-        int_field = field(default=1, init=True, repr=False, doc='Docstring')
+        int_field = field(int, default=1, init=True, repr=False, doc='Docstring')
         int_field.name = "id"
         repr_output = repr(int_field)
 
