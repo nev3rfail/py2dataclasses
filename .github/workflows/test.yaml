@@ -13,6 +13,7 @@ jobs:
         include:
           - python-version: "2.7"
             os: ubuntu-latest
+            suffix: "2"
             container: coatldev/six:latest
             tox-env: "test_ported_on_portedlib_py27"
           - python-version: "3.14"
@@ -36,9 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install tox
-        run: python -m pip install tox
+        run: python${{ matrix.suffix }} -m pip install tox
       - name: Run tox
-        run: python -m tox -e ${{ matrix.tox-env }}
+        run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
         continue-on-error: true
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
