@@ -124,6 +124,32 @@ class TestCase(unittest.TestCase):
                 x = field(int, 0)
                 y = field(int)
 
+        # A derived class adds a non-default field after a default one.
+        with self.assertRaisesRegexp(TypeError,
+                                     "non-default argument 'y' follows "
+                                     "default argument 'x'"):
+            @dataclass
+            class B(object):
+                x = field(int, 0)
+
+            @dataclass
+            class C(B):
+                y = field(int)
+
+        # Override a base class field and add a default to
+        #  a field which didn't use to have a default.
+        with self.assertRaisesRegexp(TypeError,
+                                     "non-default argument 'y' follows "
+                                     "default argument 'x'"):
+            @dataclass
+            class B(object):
+                x = field(int)
+                y = field(int)
+
+            @dataclass
+            class C(B):
+                x = field(int, 0)
+
     def test_field_no_default(self):
         @dataclass
         class C(object):
@@ -324,6 +350,26 @@ class TestCase(unittest.TestCase):
                           ('b', 'C:b'),
                           ('c', 'B:c')])
 
+        @dataclass
+        class D(B):
+            c = field(str, 'D:c')
+
+        self.assertEqual([(f.name, f.default) for f in fields(D)],
+                         [('a', 'B:a'),
+                          ('b', 'B:b'),
+                          ('c', 'D:c')])
+
+        @dataclass
+        class E(D):
+            a = field(str, 'E:a')
+            d = field(str, 'E:d')
+
+        self.assertEqual([(f.name, f.default) for f in fields(E)],
+                         [('a', 'E:a'),
+                          ('b', 'B:b'),
+                          ('c', 'D:c'),
+                          ('d', 'E:d')])
+
     def test_disallowed_mutable_defaults(self):
         # For the known types, don't allow mutable default values.
         for typ, empty, non_empty in [(list, [], [1]),
@@ -385,8 +431,35 @@ class TestCase(unittest.TestCase):
                     raise CustomError()
         with self.assertRaises(CustomError):
             C()
-        # post-init gets called, but doesn't raise.
+        # post-init gets called, but doesn't raise. This is just
+        #  checking that self is used correctly.
         C(5)
+
+        # If there's not an __init__, then post-init won't get called.
+        @dataclass(init=False)
+        class C(object):
+            def __post_init__(self):
+                raise CustomError()
+        # Creating the class won't raise
+        C()
+
+        @dataclass
+        class C(object):
+            x = field(int, 0)
+            def __post_init__(self):
+                self.x *= 2
+        self.assertEqual(C().x, 0)
+        self.assertEqual(C(2).x, 4)
+
+        # Make sure that if we're frozen, post-init can't set
+        #  attributes.
+        @dataclass(frozen=True)
+        class C(object):
+            x = field(int, 0)
+            def __post_init__(self):
+                self.x *= 2
+        with self.assertRaises(FrozenInstanceError):
+            C()
 
     def test_helper_fields_with_class_instance(self):
         # Check that we can call fields() on either a class or instance,
@@ -612,6 +685,14 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(cls(1, 2), cls(1, 2))
                 self.assertNotEqual(cls(1, 0), cls(0, 0))
                 self.assertNotEqual(cls(1, 0), cls(1, 1))
+                for idx, fn in enumerate([lambda a, b: a < b,
+                                          lambda a, b: a <= b,
+                                          lambda a, b: a > b,
+                                          lambda a, b: a >= b]):
+                    with self.subTest(idx=idx):
+                        with self.assertRaisesRegexp(TypeError,
+                                                    "not supported between instances"):
+                            fn(cls(0, 0), cls(0, 0))
 
         @dataclass(order=True)
         class C(object):
@@ -619,11 +700,27 @@ class TestCase(unittest.TestCase):
             x = field(int)
             y = field(int)
 
-        self.assertTrue(C(0, 0) == C(0, 0))
-        self.assertTrue(C(0, 0) <= C(0, 0))
-        self.assertTrue(C(0, 0) >= C(0, 0))
-        self.assertTrue(C(0, 0) < C(0, 1))
-        self.assertTrue(C(0, 1) < C(1, 0))
+        for idx, fn in enumerate([lambda a, b: a == b,
+                                  lambda a, b: a <= b,
+                                  lambda a, b: a >= b]):
+            with self.subTest(idx=idx):
+                self.assertTrue(fn(C(0, 0), C(0, 0)))
+
+        for idx, fn in enumerate([lambda a, b: a < b,
+                                  lambda a, b: a <= b,
+                                  lambda a, b: a != b]):
+            with self.subTest(idx=idx):
+                self.assertTrue(fn(C(0, 0), C(0, 1)))
+                self.assertTrue(fn(C(0, 1), C(1, 0)))
+                self.assertTrue(fn(C(1, 0), C(1, 1)))
+
+        for idx, fn in enumerate([lambda a, b: a > b,
+                                  lambda a, b: a >= b,
+                                  lambda a, b: a != b]):
+            with self.subTest(idx=idx):
+                self.assertTrue(fn(C(0, 1), C(0, 0)))
+                self.assertTrue(fn(C(1, 0), C(0, 1)))
+                self.assertTrue(fn(C(1, 1), C(1, 0)))
     #
     # def test_eq_order(self):
     #     # Test combining eq and order.
@@ -724,6 +821,14 @@ class TestCase(unittest.TestCase):
             C()
         self.assertNotIn('x', C.__dict__)
 
+        @dataclass
+        class D(object):
+            x = field(int)
+        with self.assertRaisesRegexp(TypeError,
+                                     r"__init__\(\) (takes exactly 2 arguments \(1 given\)|missing 1 required positional argument)"):
+            D()
+        self.assertNotIn('x', D.__dict__)
+
     def test_missing_default_factory(self):
         # Test that MISSING works the same as a default factory not being specified.
         @dataclass
@@ -736,17 +841,26 @@ class TestCase(unittest.TestCase):
             C()
         self.assertNotIn('x', C.__dict__)
 
+        @dataclass
+        class D(object):
+            x = field(int, default=MISSING, default_factory=MISSING)
+        with self.assertRaisesRegexp(TypeError,
+                                     r"__init__\(\) (takes exactly 2 arguments \(1 given\)|missing 1 required positional argument)"):
+            D()
+        self.assertNotIn('x', D.__dict__)
+
     def test_field_repr(self):
-        int_field = field(default=1, init=True, repr=False)
+        int_field = field(default=1, init=True, repr=False, doc='Docstring')
         int_field.name = "id"
         repr_output = repr(int_field)
 
-        # Check the Field repr matches CPython format
+        # Check the Field repr contains expected components
         self.assertIn("Field(name='id'", repr_output)
         self.assertIn("default=1", repr_output)
         self.assertIn("init=True", repr_output)
         self.assertIn("repr=False", repr_output)
-    @unittest.skip("Do not want")
+        self.assertIn("doc='Docstring'", repr_output)
+
     def test_field_recursive_repr(self):
         rec_field = field()
         rec_field.type = rec_field
@@ -754,22 +868,16 @@ class TestCase(unittest.TestCase):
         repr_output = repr(rec_field)
 
         self.assertIn(",type=...,", repr_output)
-    class GC(object):
-        pass
+
     def test_recursive_annotation(self):
         class C(object):
             pass
 
         @dataclass
-        class RECURSIVE(object):
-            GC = field(TestCase.GC)
-        _locals = locals()
-        @dataclass
         class D(object):
-            C = field(_locals["C"])
+            C = field(C)
 
-        r = repr(D.__dataclass_fields__["C"])
-        self.assertTrue("<C>" in r or ".C'>" in r, r)
+        self.assertIn(",type=...,", repr(D.__dataclass_fields__["C"]))
 
     def test_dataclass_params_repr(self):
         # Even though this is testing an internal implementation detail,
@@ -801,7 +909,7 @@ class TestCase(unittest.TestCase):
         for param in _signature(dataclass).parameters:
             if param == 'cls':
                 continue
-            self.assertTrue(hasattr(Some.__dataclass_params__, param), msg=param)
+            self.assertHasAttr(Some.__dataclass_params__, param)
 
     def test_overwrite_hash(self):
         # Test that declaring this class isn't an error.  It should
@@ -1442,12 +1550,12 @@ class TestCase(unittest.TestCase):
         self.assertEqual(box.label, 'unknown')
 
     def test_generic_extending(self):
-        from typing import TypeVar
+        from typing import TypeVar, Generic
         S = TypeVar('S')
         T = TypeVar('T')
 
         @dataclass
-        class Base(object):
+        class Base(Generic[T, S]):
             x = field(T)
             y = field(S)
 
@@ -1457,6 +1565,13 @@ class TestCase(unittest.TestCase):
 
         c = DataDerived(0, 'test1', 'test2')
         self.assertEqual(astuple(c), (0, 'test1', 'test2'))
+
+        class NonDataDerived(Base):
+            def new_method(self):
+                return self.y
+
+        c = NonDataDerived(10, 1.0)
+        self.assertEqual(c.new_method(), 1.0)
 
     def test_generic_dynamic(self):
         from typing import TypeVar, Optional
@@ -1512,7 +1627,25 @@ class TestCase(unittest.TestCase):
             x = field(int)
             y = field(int)
 
-        self.assertTrue(A.__qualname__.endswith(".A"), A.__qualname__)
+        self.assertEqual(A.__init__.__name__, "__init__")
+        for function in (
+            '__eq__',
+            '__lt__',
+            '__le__',
+            '__gt__',
+            '__ge__',
+            '__hash__',
+            '__init__',
+            '__repr__',
+            '__setattr__',
+            '__delattr__',
+        ):
+            # Check that qualname contains the class name (may vary by implementation)
+            qualname = getattr(A, function).__qualname__
+            self.assertIn('A', qualname, "Function {} qualname should contain 'A': {}".format(function, qualname))
+
+        with self.assertRaisesRegexp(TypeError, r"A\.__init__\(\) missing"):
+            A()
 
     def test_class_var(self):
         # Make sure ClassVars are ignored in __init__, __repr__, etc.
@@ -1613,10 +1746,14 @@ class TestCase(unittest.TestCase):
 
     def test_init_var_with_default(self):
         # If an InitVar has a default value, it should be set on the class.
-        
         @dataclass
         class C(object):
             x = field(InitVar(int), 10)
+        self.assertEqual(C.x, 10)
+
+        @dataclass
+        class C(object):
+            x = field(InitVar(int), default=10)
         self.assertEqual(C.x, 10)
 
     def test_init_var(self):
@@ -1634,9 +1771,17 @@ class TestCase(unittest.TestCase):
         self.assertEqual(c.x, 20)
 
     def test_init_var_preserve_type(self):
-        
         iv = InitVar(int)
         self.assertEqual(iv.type, int)
+
+        # Make sure the repr is correct.
+        try:
+            from typing import List
+            self.assertIn('InitVar[int]', repr(InitVar(int)))
+            self.assertIn('InitVar', repr(InitVar(List[int])))
+        except:
+            # Type repr may vary in py2, just check it doesn't crash
+            repr(InitVar(int))
 
     def test_init_var_inheritance(self):
         
@@ -1748,6 +1893,11 @@ class TestCase(unittest.TestCase):
         c = C(1, 3)
         self.assertEqual((c.x, c.z), (1, 3))
 
+        # .y was not initialized.
+        with self.assertRaisesRegexp(AttributeError,
+                                     'object has no attribute'):
+            c.y
+
     def test_is_dataclass_inheritance(self):
         @dataclass
         class X(object):
@@ -1768,7 +1918,15 @@ class TestCase(unittest.TestCase):
                 return 0
         self.assertFalse(is_dataclass(A))
         a = A()
-        self.assertFalse(is_dataclass(a))
+
+        # Also test for an instance attribute.
+        class B(object):
+            pass
+        b = B()
+        b.__dataclass_fields__ = []
+
+        for obj in [a, b]:
+            self.assertFalse(is_dataclass(obj))
 
     def test_helper_asdict_copy_values(self):
         @dataclass
@@ -1816,7 +1974,7 @@ class TestCase(unittest.TestCase):
         self.assertIsInstance(d, OrderedDict)
 
     def test_helper_asdict_namedtuple(self):
-        from collections import namedtuple
+        from collections import namedtuple, OrderedDict
         T = namedtuple('T', 'a b c')
         @dataclass
         class C(object):
@@ -1832,6 +1990,22 @@ class TestCase(unittest.TestCase):
                                     2),
                              }
                          )
+
+        # Now with a dict_factory.  OrderedDict is convenient, but
+        # since it compares to dicts, we also need to have separate
+        # assertIs tests.
+        d = asdict(c, dict_factory=OrderedDict)
+        self.assertEqual(d, {'x': 'outer',
+                             'y': T(1,
+                                    {'x': 'inner',
+                                     'y': T(11, 12, 13)},
+                                    2),
+                             }
+                         )
+
+        # Make sure that the returned dicts are actually OrderedDicts.
+        self.assertIs(type(d), OrderedDict)
+        self.assertIs(type(d['y'][1]), OrderedDict)
 
     def test_helper_asdict_namedtuple_key(self):
         from collections import namedtuple
@@ -2098,15 +2272,17 @@ class TestCase(unittest.TestCase):
             f = field(int, 4)
 
         calls = []
-        original_setattr = C.__setattr__
         def setattr(self, name, value):
             calls.append((name, value))
-            original_setattr(self, name, value)
 
         C.__setattr__ = setattr
         c = C(0, 1)
         self.assertEqual(('a', 0), calls[0])
         self.assertEqual(('b', 1), calls[1])
+        self.assertEqual(('c', []), calls[2])
+        self.assertEqual(('d', []), calls[3])
+        self.assertNotIn(('e', 4), calls)
+        self.assertEqual(('f', 4), calls[4])
 
     def test_alternate_classmethod_constructor(self):
         @dataclass
@@ -2126,22 +2302,34 @@ class TestCase(unittest.TestCase):
         try:
             fields(object)
         except TypeError as exc:
-            s = traceback.format_exc(10)
-            if not isinstance(s, type(u'')):
-                s = s.decode("utf-8")
-            print(s, file=stdout)
-            #traceback.print_exception(type(exc), exc, sys.exc_info()[2], file=stdout)
+            traceback.print_exc(file=stdout)
         printed_traceback = stdout.getvalue()
         self.assertNotIn("AttributeError", printed_traceback)
         self.assertNotIn("__dataclass_fields__", printed_traceback)
 
     def test_incomplete_annotations(self):
+        try:
+            import annotationlib
+        except ImportError:
+            # annotationlib not available in py2, skip the advanced test
+            @dataclass
+            class C(object):
+                pass
+            # For now, just make sure it doesn't crash
+            _ = C()
+            return
+
         @dataclass
         class C(object):
-            pass
+            "doc"
+            x = field(int)
 
-        # For now, just make sure it doesn't crash
-        _ = C()
+        C.__annotate__ = lambda _: {}
+
+        self.assertEqual(
+            annotationlib.get_annotations(C.__init__),
+            {"return": None}
+        )
 
     def test_classvar_default_factory(self):
         # It's an error for a ClassVar to have a factory function.
