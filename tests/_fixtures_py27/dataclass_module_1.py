@@ -16,7 +16,7 @@ T_IV3 = dataclasses.InitVar
 @dataclasses.dataclass
 class CV(object):
     T_CV4 = typing.ClassVar
-    cv0 = dataclasses.field(20)
+    cv0 = dataclasses.field(typing.ClassVar[int], 20)
     cv1 = dataclasses.field(typing.ClassVar, 30)
     cv2 = T_CV2
     cv3 = T_CV3
