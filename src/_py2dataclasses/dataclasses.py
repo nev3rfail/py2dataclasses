@@ -67,6 +67,7 @@ from .abc_utils import update_abstractmethods
 from .type_utils import make_alias, _get_type_str, MISSING
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
+
 builtin_repr = repr
 from .class_utils import is_descriptor, qualname, _qualname
 
@@ -76,8 +77,8 @@ else:
     _dict_proxy = types.MappingProxyType
 
 import typing
-MappingProxyType = _dict_proxy
 
+MappingProxyType = _dict_proxy
 
 try:
     import annotationlib as _annotationlib
@@ -119,6 +120,7 @@ if _annotationlib is not None:
                 _evaluate_annotation(arg, globals_dict)
             return ann
         return ann
+
 
     def _make_annotate_function(__class__, method_name, annotation_fields, return_type, field_annotations=None):
         """Create an __annotate__ function for a generated dataclass method (PEP 649)."""
@@ -187,6 +189,8 @@ if _annotationlib is not None:
         __annotate__.__qualname__ = '{0}.{1}.__annotate__'.format(
             __class__.__qualname__, method_name)
         return __annotate__
+
+
 def _get_annotations(cls):
     """Get class annotations safely, supporting deferred annotations (PEP 649)."""
     if _annotationlib is not None:
@@ -200,8 +204,11 @@ def _get_annotations(cls):
 
 
 class DataclassInstance(typing.Protocol):
-    __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, _Field[typing.Any]]]
+    __dataclass_fields__ = None  # type: typing.ClassVar[typing.Dict[str, _Field[typing.Any]]]
+
+
 _DataclassT = typing.TypeVar("_DataclassT", bound=DataclassInstance)
+
 
 # Raised when an attempt is made to modify a frozen class.
 class FrozenInstanceError(AttributeError):
@@ -215,10 +222,8 @@ class _HAS_DEFAULT_FACTORY_CLASS(object):
     def __repr__(self):
         return '<factory>'
 
+
 _HAS_DEFAULT_FACTORY = _HAS_DEFAULT_FACTORY_CLASS()
-
-
-
 
 
 # A sentinel object to indicate that following fields are keyword-only by
@@ -226,8 +231,8 @@ _HAS_DEFAULT_FACTORY = _HAS_DEFAULT_FACTORY_CLASS()
 class _KW_ONLY_TYPE(object):
     pass
 
-KW_ONLY = _KW_ONLY_TYPE()
 
+KW_ONLY = _KW_ONLY_TYPE()
 
 # Since most per-field metadata will be unused, create an empty
 # read-only proxy that can be shared among all fields.
@@ -242,10 +247,10 @@ class _FIELD_BASE(object):
     def __repr__(self):
         return self.name
 
+
 _FIELD = _FIELD_BASE('_FIELD')
 _FIELD_CLASSVAR = _FIELD_BASE('_FIELD_CLASSVAR')
 _FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
-
 
 # The name of an attribute on the class where we store the Field
 # objects.  Also used to check if a class is a Data Class.
@@ -262,6 +267,7 @@ _POST_INIT_NAME = '__post_init__'
 # String regex that string annotations for ClassVar or InitVar must match.
 # Allows "identifier.identifier[" or "identifier[".
 _MODULE_IDENTIFIER_RE = re.compile(r'^(?:\s*(\w+)\s*\.)?\s*(\w+)')
+
 
 # Atomic immutable types which don't require any recursive handling and for which deepcopy
 # returns the same object. We can provide a fast-path for these types in asdict and astuple.
@@ -283,8 +289,8 @@ _MODULE_IDENTIFIER_RE = re.compile(r'^(?:\s*(\w+)\s*\.)?\s*(\w+)')
 def _build_atomic_types():
     _types = set()
     # These are universally available via type():
-    _types.add(type(None))       # NoneType
-    _types.add(type(types.EllipsisType))        # EllipsisType  (Ellipsis exists in Py2 too)
+    _types.add(type(None))  # NoneType
+    _types.add(type(types.EllipsisType))  # EllipsisType  (Ellipsis exists in Py2 too)
     _types.add(type(NotImplemented))  # NotImplementedType
     # Standard built-ins present on both Py2 and Py3:
     for _t in (bool, int, float, str, complex, bytes, type, property,
@@ -299,6 +305,7 @@ def _build_atomic_types():
             _types.add(xrange)  # noqa: F821
     return frozenset(_types)
 
+
 _ATOMIC_TYPES = _build_atomic_types()
 
 # Any marker is used in `make_dataclass` to mark unannotated fields as `Any`
@@ -306,7 +313,6 @@ _ATOMIC_TYPES = _build_atomic_types()
 _ANY_MARKER = object()
 
 InitVar = make_alias("InitVar", "T")
-
 
 
 # Instances of Field are only ever created from within this module,
@@ -383,18 +389,20 @@ class _Field(object):
         return ('{12!s}<{1!s}>(name=({0!r}),' +
                 ('default={2!r},' if self.default is not MISSING else "") +
                 ('default_factory={3!r},' if self.default_factory is not MISSING else "") +
-                ('init={4!r},' if self.init else "" ) +
-                ('repr={5!r},' if self.repr else "" ) +
-                ('hash={6!r},' if self.hash else "" ) +
-                ('compare={7!r},' if self.compare else "" ) +
-                ('metadata={8!r},' if self.metadata else "" ) +
-                ('kw_only={9!r},' if self.kw_only else "" ) +
-                ('doc={10!r},' if self.doc else "" ) +
-                ('_field_type={11}' if self._field_type is not MISSING else "" ) +
+                ('init={4!r},' if self.init else "") +
+                ('repr={5!r},' if self.repr else "") +
+                ('hash={6!r},' if self.hash else "") +
+                ('compare={7!r},' if self.compare else "") +
+                ('metadata={8!r},' if self.metadata else "") +
+                ('kw_only={9!r},' if self.kw_only else "") +
+                ('doc={10!r},' if self.doc else "") +
+                ('_field_type={11}' if self._field_type is not MISSING else "") +
                 ')').format(
             self.name, getattr(self.type, "__name__", self.type.__class__.__name__), self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
-            self.metadata, self.kw_only, self.doc, self._field_type, self.__class__.__module__ +"."+self.__class__.__name__)
+            self.metadata, self.kw_only, self.doc, self._field_type,
+            self.__class__.__module__ + "." + self.__class__.__name__)
+
     def __set_name__(self, owner, name):
         func = getattr(type(self.default), '__set_name__', None)
         if func:
@@ -469,10 +477,13 @@ def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
     return _cls(default, default_factory, init, repr, hash, compare,
                 metadata, kw_only, doc)
 
+
 def of(_typ):
     return _typ
 
+
 T = typing.TypeVar("T")
+
 
 def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, repr=True,
           hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, **kwargs):
@@ -483,8 +494,10 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     f.type = _typ
     return f
 
+
 def throw(e, m):
     raise e(m)
+
 
 class Field(_Field):
     def __get__(self, instance, owner):
@@ -496,7 +509,8 @@ class Field(_Field):
             elif self.name and hasattr(instance, self.name):
                 v = object.__getattribute__(self, self.name)
             else:
-                v= self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(AttributeError, "object has no attribute {}".format(self.name))
+                v = self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(
+                    AttributeError, "object has no attribute {}".format(self.name))
                 # v = (self.default if self.default is not MISSING
                 #      else self.default_factory() if self.default_factory is not MISSING
                 # else throw(AttributeError, "object has no attribute {}".format(self.name)))
@@ -594,7 +608,7 @@ class _FuncBuilder(object):
 
         txt = 'def __create_fn__({0}):\n{1}\n return {2}'.format(local_vars, fns_src, return_names)
         ns = OrderedDict()
-        exec(txt, self.globals, ns)
+        exec (txt, self.globals, ns)
         fns = ns['__create_fn__'](**self.locals)
 
         # Now that we've generated the functions, assign them into cls.
@@ -610,7 +624,7 @@ class _FuncBuilder(object):
             if name in self.method_annotations:
                 annotation_fields, return_type = self.method_annotations[name]
 
-                #ann_field_names, ret_type = self.method_annotations[name]
+                # ann_field_names, ret_type = self.method_annotations[name]
                 # Set __annotate__ for PEP 649 deferred evaluation
                 if _annotationlib is not None:
                     # Build field_annotations for __annotate__
@@ -781,11 +795,11 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
                 '"__init__() got unexpected keyword arguments: " + ", ".join(__kw_only_kwargs__))')
             body_lines = kw_extraction + body_lines
     return func_builder.add_fn('__init__',
-                        [self_name] + _init_params,
-                        body_lines,
-                        locals=locals,
-                        return_type=None,
-                        annotation_fields=annotation_fields)
+                               [self_name] + _init_params,
+                               body_lines,
+                               locals=locals,
+                               return_type=None,
+                               annotation_fields=annotation_fields)
 
 
 def _frozen_get_del_attr(cls, fields, func_builder):
@@ -797,19 +811,19 @@ def _frozen_get_del_attr(cls, fields, func_builder):
         condition += ' or name in {' + ', '.join(repr(f.name) for f in fields) + '}'
 
     attach_debug_function(cls, *func_builder.add_fn('__setattr__',
-                        ('self', 'name', 'value'),
-                        ('  if {0}:'.format(condition),
-                         '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
-                         '  super(__dataclass_self__, self).__setattr__(name, value)'),
-                        locals=locals,
-                        overwrite_error=True))
+                                                    ('self', 'name', 'value'),
+                                                    ('  if {0}:'.format(condition),
+                                                     '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
+                                                     '  super(__dataclass_self__, self).__setattr__(name, value)'),
+                                                    locals=locals,
+                                                    overwrite_error=True))
     attach_debug_function(cls, *func_builder.add_fn('__delattr__',
-                        ('self', 'name'),
-                        ('  if {0}:'.format(condition),
-                         '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
-                         '  super(__dataclass_self__, self).__delattr__(name)'),
-                        locals=locals,
-                        overwrite_error=True))
+                                                    ('self', 'name'),
+                                                    ('  if {0}:'.format(condition),
+                                                     '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
+                                                     '  super(__dataclass_self__, self).__delattr__(name)'),
+                                                    locals=locals,
+                                                    overwrite_error=True))
 
 
 def _is_classvar(a_type, typing):
@@ -884,7 +898,7 @@ def _get_field(cls, a_name, a_type, default_kw_only):
         f = field(default=default, _typ=a_type)
 
     # Only at this point do we know the name and the type.  Set them.
-    #f.name = a_name
+    # f.name = a_name
     if f.name != a_name:
         f.__set_name__(cls, a_name)
     f.type = a_type
@@ -904,8 +918,6 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # Check for InitVar
     if f._field_type is _FIELD:
         dataclasses = sys.modules[__name__]
-        if cls.__name__ == "CSSS":
-            pass
         if (_is_initvar(a_type, dataclasses)
                 or (isinstance(f.type, str)
                     and _is_type(f.type, cls, dataclasses, dataclasses.InitVar,
@@ -951,9 +963,9 @@ def _hash_add(cls, fields, func_builder):
     flds = [f for f in fields if (f.compare if f.hash is None else f.hash)]
     self_tuple = _tuple_str('self', flds)
     attach_debug_function(cls, *func_builder.add_fn('__hash__',
-                        ('self',),
-                        ['  return hash({0})'.format(self_tuple)],
-                        unconditional_add=True))
+                                                    ('self',),
+                                                    ['  return hash({0})'.format(self_tuple)],
+                                                    unconditional_add=True))
 
 
 def _hash_exception(cls, fields, func_builder):
@@ -961,26 +973,26 @@ def _hash_exception(cls, fields, func_builder):
     raise TypeError('Cannot overwrite attribute __hash__ in class {0}'.format(cls.__name__))
 
 
-
 _hash_action = {
-    #(unsafe_hash, eq,    frozen, has_explicit_hash)
+    # (unsafe_hash, eq,    frozen, has_explicit_hash)
     (False, False, False, False): None,
-    (False, False, False, True ): None,
-    (False, False, True,  False): None,
-    (False, False, True,  True ): None,
-    (False, True,  False, False): _hash_set_none,
-    (False, True,  False, True ): None,
-    (False, True,  True,  False): _hash_add,
-    (False, True,  True,  True ): None,
-    (True,  False, False, False): _hash_add,
-    (True,  False, False, True ): _hash_exception,
-    (True,  False, True,  False): _hash_add,
-    (True,  False, True,  True ): _hash_exception,
-    (True,  True,  False, False): _hash_add,
-    (True,  True,  False, True ): _hash_exception,
-    (True,  True,  True,  False): _hash_add,
-    (True,  True,  True,  True ): _hash_exception,
+    (False, False, False, True): None,
+    (False, False, True, False): None,
+    (False, False, True, True): None,
+    (False, True, False, False): _hash_set_none,
+    (False, True, False, True): None,
+    (False, True, True, False): _hash_add,
+    (False, True, True, True): None,
+    (True, False, False, False): _hash_add,
+    (True, False, False, True): _hash_exception,
+    (True, False, True, False): _hash_add,
+    (True, False, True, True): _hash_exception,
+    (True, True, False, False): _hash_add,
+    (True, True, False, True): _hash_exception,
+    (True, True, True, False): _hash_add,
+    (True, True, True, True): _hash_exception,
 }
+
 
 def collect_annotations(cls):
     items = []
@@ -1001,7 +1013,6 @@ def collect_annotations(cls):
                 name_val_mapping[name] = value
             items.append((value.order, name, t))
             i = value.order
-
 
     items.sort(key=lambda x: x[0])  # sort by descriptor order
     retvar = OrderedDict()
@@ -1028,9 +1039,11 @@ def collect_annotations(cls):
 
     return retvar
 
+
 def attach_debug_function(cls, fname, f):
     _set_new_attribute(cls, "fn_bodies", {})
     cls.fn_bodies[fname] = f
+
 
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
@@ -1068,7 +1081,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Get annotations - in Python 2.7 we expect this to be set by external lib
     cls_annotations = _has_annotations(cls) or OrderedDict()
-
 
     # Now find fields in our class.
     cls_fields = []
@@ -1178,15 +1190,14 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         has_post_init = hasattr(cls, _POST_INIT_NAME)
 
         attach_debug_function(cls, *_init_fn(all_init_fields,
-                 std_init_fields,
-                 kw_only_init_fields,
-                 frozen,
-                 has_post_init,
-                 '__dataclass_self__' if 'self' in fields else 'self',
-                 func_builder,
-                 slots,
-                 ))
-
+                                             std_init_fields,
+                                             kw_only_init_fields,
+                                             frozen,
+                                             has_post_init,
+                                             '__dataclass_self__' if 'self' in fields else 'self',
+                                             func_builder,
+                                             slots,
+                                             ))
 
     _set_new_attribute(cls, '__replace__', _replace)
 
@@ -1219,10 +1230,11 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             decorator = None
 
         attach_debug_function(cls, *func_builder.add_fn('__repr__',
-                            ('self',),
-                            body,
-                            locals={'__dataclasses_recursive_repr':  recursive_repr, '__dataclasses_actual_recursive_repr': actual_recursive_repr},
-                            decorator=decorator))
+                                                        ('self',),
+                                                        body,
+                                                        locals={'__dataclasses_recursive_repr': recursive_repr,
+                                                                '__dataclasses_actual_recursive_repr': actual_recursive_repr},
+                                                        decorator=decorator))
 
     if eq:
         # Create __eq__ method.
@@ -1230,12 +1242,12 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         terms = ['self.{0}==other.{0}'.format(field.name) for field in cmp_fields]
         field_comparisons = ' and '.join(terms) or 'True'
         attach_debug_function(cls, *func_builder.add_fn('__eq__',
-                            ('self', 'other'),
-                            ['  if self is other:',
-                             '   return True',
-                             '  if other.__class__ is self.__class__:',
-                             '   return {0}'.format(field_comparisons),
-                             '  return NotImplemented']))
+                                                        ('self', 'other'),
+                                                        ['  if self is other:',
+                                                         '   return True',
+                                                         '  if other.__class__ is self.__class__:',
+                                                         '   return {0}'.format(field_comparisons),
+                                                         '  return NotImplemented']))
 
     if order:
         # Create and set the ordering methods.
@@ -1548,10 +1560,12 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
         qual_name = cls.__qualname__
     # Use types.new_class() for Generic classes to support MRO entry resolution
     bases = cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__
-    if typing.Generic in cls.__bases__ or any(hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
+    if typing.Generic in cls.__bases__ or any(
+            hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
         # Use types.new_class() for classes with __mro_entries__ (like Generic)
         def exec_body(ns):
             ns.update(cls_dict)
+
         newcls = _make_class(cls.__name__, bases, exec_body=exec_body)
     else:
         newcls = type(cls)(cls.__name__, bases, cls_dict)
@@ -1646,6 +1660,7 @@ def annotate(__annotations__, **kwargs):
         kwargs = __annotations__
     if kwargs is None:
         raise ValueError('annotations must be provided as keyword arguments')
+
     def dec(f):
         if _has_annotations(f):
             for k, v in kwargs.items():
@@ -1656,6 +1671,7 @@ def annotate(__annotations__, **kwargs):
             else:
                 setattr(f, "__annotations__", OrderedDict(kwargs))
         return f
+
     return dec
 
 
@@ -1675,6 +1691,7 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     all fields are keyword-only. If slots is true, a new class with a
     __slots__ attribute is returned.
     """
+
     # class F(object):
     #     @property
     #     def aa(self):
@@ -1734,6 +1751,7 @@ def is_dataclass(obj):
 
 
 _default_dict_factory = dict if sys.version_info >= (3, 7) else OrderedDict
+
 
 def asdict(obj, dict_factory=_default_dict_factory):
     """Return the fields of a dataclass instance as a new dictionary mapping
@@ -1873,22 +1891,23 @@ def _make_class(name, bases=(), kwds=None, exec_body=None):
 
 
 def make_dataclass(
-        cls_name, # type: str
-        fields, # type: typing.Iterable[typing.Union[str, typing.Tuple[str, typing.Any], typing.Tuple[str, typing.Any, typing.Any]]]
-        bases=(), # type: typing.Tuple[type, ...]
-        namespace=None, # type: typing.Optional[typing.Dict[str, typing.Any]]
-        init=True, # type: bool
-        repr=True, # type: bool
-        eq=True, # type: bool
-        order=False, # type: bool
-        unsafe_hash=False, # type: bool
-        frozen=False, # type: bool
-        match_args=True, # type: bool
-        kw_only=False, # type: bool
-        slots=False, # type: bool
-        weakref_slot=False, # type: bool
-        module=None, # type: typing.Optional[str],
-        decorator=dataclass # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
+        cls_name,  # type: str
+        fields,
+        # type: typing.Iterable[typing.Union[str, typing.Tuple[str, typing.Any], typing.Tuple[str, typing.Any, typing.Any]]]
+        bases=(),  # type: typing.Tuple[type, ...]
+        namespace=None,  # type: typing.Optional[typing.Dict[str, typing.Any]]
+        init=True,  # type: bool
+        repr=True,  # type: bool
+        eq=True,  # type: bool
+        order=False,  # type: bool
+        unsafe_hash=False,  # type: bool
+        frozen=False,  # type: bool
+        match_args=True,  # type: bool
+        kw_only=False,  # type: bool
+        slots=False,  # type: bool
+        weakref_slot=False,  # type: bool
+        module=None,  # type: typing.Optional[str],
+        decorator=dataclass  # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
 ):
     # type: (...) -> type
 
@@ -1920,7 +1939,6 @@ def make_dataclass(
         namespace = OrderedDict(namespace)
     else:
         print("WARNING: wtf is `namespace`?", namespace, file=sys.stderr)
-
 
     # Validate field names
     seen = set()
@@ -1961,6 +1979,7 @@ def make_dataclass(
             resolved_annotations[name] = tp
     namespace['__annotations__'] = resolved_annotations
     value_blocked = [True]  # mutable for closure
+
     # Update namespace
     def annotate_method(format=None):
         if six.PY2 or not _annotationlib:
@@ -1993,6 +2012,7 @@ def make_dataclass(
     def exec_body_callback(ns):
         ns.update(namespace)
         ns.update(defaults)
+
     # Create the class
     cls = _make_class(cls_name, bases, OrderedDict(), exec_body_callback)
     cls.__annotate__ = annotate_method
