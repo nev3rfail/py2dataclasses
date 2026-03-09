@@ -1,26 +1,31 @@
 """Setup script for py2dataclasses - works on Python 2.7+ and Python 3."""
+from __future__ import print_function
 import io
-from setuptools import setup
+from setuptools import setup, find_packages
 
+# Read the README
 with io.open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
     name='py2dataclasses',
-    version='3.14.2',
+    version='3.14.10',
     description='PEP-557 compatible dataclasses backport for Python 2.7+',
     long_description=long_description,
     long_description_content_type='text/markdown',
     author='nev3rfail',
     license='MIT',
+    url='https://github.com/nev3rfail/py2dataclasses',
     package_dir={'': 'src'},
-    packages=['dataclasses'],
+    py_modules=['dataclasses', 'py2dataclasses'],
+    packages=find_packages('src'),
     python_requires='>=2.7',
     install_requires=[
         'typing>=3.7; python_version<"3.5"',
         'typing-extensions>=3.7; python_version<"3.8"',
         'dictproxyhack>=1.1; python_version<"3.0"',
         'funcsigs>=1.0; python_version<"3.0"',
+        'six>=1.17'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

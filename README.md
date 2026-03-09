@@ -2,18 +2,6 @@
 
 This repo is a PEP-557 compatible dataclass implementation for Python 2.7.
 
-***
-
-### Disclaimer
-
-Sometimes systems have a proprietary legacy that is not possible
-to port to newer versions of languages. But people
-still need to work, systems using python 2 still have to be supported and extended.
-
-## ⚠ WARNING
-
-* Please, DO NOT use Python 2.7 in 2026
-
 ## Usage
 
 On Python 2.7 there is no annotation syntax (`x: int`), so fields are declared using `field()` descriptors:
@@ -31,6 +19,18 @@ print(p)        # Point(x=3, y=4)
 print(p.x)      # 3
 print(p == Point(3, 4))  # True
 ```
+
+## Disclaimer
+
+Sometimes systems have a proprietary legacy that is not possible
+to port to newer versions of languages. But people
+still need to work, systems using python 2 still have to be supported and extended.
+
+### ⚠ WARNING
+
+* Please, DO NOT use Python 2.7 in 2026
+
+
 ## Development
 
 - This is quite a straightforward convertion of dataclasses into a py2 syntax/standard done initially by neural network,
