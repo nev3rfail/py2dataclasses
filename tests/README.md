@@ -17,8 +17,10 @@
 2. After each step, append the description of your step to THIS file. This is your bible.
 3. Our task is to port tests from python 314 to python 2.7:
    - We have `dataclasses` module that is compatible with the mainline dataclasses module. We have shims for typing. We have shims for annotationlib. No test is unportable, if you don't know how exactly port test from py 3.14 to py 2.7 then just port it line by line, replacing f-strings with py2-compat strings and replace py3 type annotations with `field`-ones.
+   - You need to make sure that tests ported to py2.7 represent ones from py314. Compare each test function by function, line by line.
+   - If something is missing, write the missing 2.7 test. Do not edit 314 tests, they are immutable.
 
-You need to make sure that tests ported to py2.7 represent ones from py314. Compare each test line by line. If something is missing, write the missing 2.7 test. Do not edit 314 tests, they are immutable.
+
 
 # The agent log goes here:
 - ...
