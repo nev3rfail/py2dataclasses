@@ -870,26 +870,18 @@ def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
 
 
 def _get_field(cls, a_name, a_type, default_kw_only):
-    # Return a Field object for this field name and type.
-
-    # If the default value isn't derived from Field, then it's only a
-    # normal default value.  Convert it to a Field().
     default = getattr(cls, a_name, MISSING)
     if isinstance(default, (_Field, Field)):
         f = default
     else:
         if isinstance(default, types.MemberDescriptorType):
-            # This is a field in __slots__, so it has no default value.
             default = MISSING
         f = field(default=default, _typ=a_type)
 
-    # Only at this point do we know the name and the type.  Set them.
-    #f.name = a_name
     if f.name != a_name:
         f.__set_name__(cls, a_name)
     f.type = a_type
 
-    # Assume it's a normal field until proven otherwise.
     f._field_type = _FIELD
 
     # Check for ClassVar
@@ -901,23 +893,18 @@ def _get_field(cls, a_name, a_type, default_kw_only):
                                  _is_classvar))):
             f._field_type = _FIELD_CLASSVAR
 
-    # Check for InitVar
     if f._field_type is _FIELD:
         dataclasses = sys.modules[__name__]
-        if cls.__name__ == "CSSS":
-            pass
         if (_is_initvar(a_type, dataclasses)
                 or (isinstance(f.type, str)
                     and _is_type(f.type, cls, dataclasses, dataclasses.InitVar,
                                  _is_initvar))):
             f._field_type = _FIELD_INITVAR
 
-    # Validations for individual fields.
     if f._field_type in (_FIELD_CLASSVAR, _FIELD_INITVAR):
         if f.default_factory is not MISSING:
             raise TypeError('field {0} cannot have a default factory'.format(f.name))
 
-    # kw_only validation and assignment.
     if f._field_type in (_FIELD, _FIELD_INITVAR):
         if f.kw_only is MISSING:
             f.kw_only = default_kw_only
@@ -926,7 +913,6 @@ def _get_field(cls, a_name, a_type, default_kw_only):
         if f.kw_only is not MISSING:
             raise TypeError('field {0} is a ClassVar but specifies kw_only'.format(f.name))
 
-    # For real fields, disallow mutable defaults.
     if f._field_type is _FIELD and f.default.__class__.__hash__ is None:
         raise ValueError('mutable default {0} for field {1} is not allowed: use default_factory'.format(
             type(f.default), f.name))
@@ -935,8 +921,6 @@ def _get_field(cls, a_name, a_type, default_kw_only):
 
 
 def _set_new_attribute(cls, name, value):
-    # Never overwrites an existing attribute.  Returns True if the
-    # attribute already exists.
     if name in cls.__dict__:
         return True
     setattr(cls, name, value)
@@ -951,19 +935,16 @@ def _hash_add(cls, fields, func_builder):
     flds = [f for f in fields if (f.compare if f.hash is None else f.hash)]
     self_tuple = _tuple_str('self', flds)
     attach_debug_function(cls, *func_builder.add_fn('__hash__',
-                        ('self',),
-                        ['  return hash({0})'.format(self_tuple)],
-                        unconditional_add=True))
+                                                    ('self',),
+                                                    ['  return hash({0})'.format(self_tuple)],
+                                                    unconditional_add=True))
 
 
 def _hash_exception(cls, fields, func_builder):
-    # Raise an exception.
     raise TypeError('Cannot overwrite attribute __hash__ in class {0}'.format(cls.__name__))
 
 
-
 _hash_action = {
-    #(unsafe_hash, eq,    frozen, has_explicit_hash)
     (False, False, False, False): None,
     (False, False, False, True ): None,
     (False, False, True,  False): None,
@@ -1016,8 +997,7 @@ def collect_annotations(cls):
         # i += 1
 
 
-
-    items.sort(key=lambda x: x[0])  # sort by descriptor order
+    items.sort(key=lambda x: x[0])
     retvar = OrderedDict()
     collected = OrderedDict((name, t) for _, name, t in items)
     if _existing_annotations:
@@ -1048,7 +1028,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
     fields = OrderedDict()
 
-    # Save reference to the built-in repr before it's shadowed by the parameter
     _builtin_repr = __builtins__.get('repr') if isinstance(__builtins__, dict) else getattr(__builtins__, 'repr')
 
     if cls.__module__ in sys.modules:
@@ -1081,23 +1060,17 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             all_frozen_bases = all_frozen_bases and current_frozen
             any_frozen_base = any_frozen_base or current_frozen
 
-    # Get annotations - in Python 2.7 we expect this to be set by external lib
     cls_annotations = _has_annotations(cls) or OrderedDict()
 
-
-    # Now find fields in our class.
     cls_fields = []
     KW_ONLY_seen = False
     dataclasses = sys.modules[__name__]
     for name, type_ in cls_annotations.items():
-        # Convert _ANY_MARKER to ForwardRef('Any') for PEP 649 compatibility in field types
         if type_ is _ANY_MARKER:
             if _annotationlib is not None:
                 type_ = _annotationlib.ForwardRef('Any', module='typing')
             else:
-                # Import typing only when needed
                 type_ = typing.Any
-        # See if this is a marker to change the value of kw_only.
         if (_is_kw_only(type_, dataclasses)
                 or (isinstance(type_, str)
                     and _is_type(type_, cls, dataclasses, dataclasses.KW_ONLY,
@@ -1107,7 +1080,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             KW_ONLY_seen = True
             kw_only = True
         else:
-            # Otherwise it's a field of some type.
             cls_fields.append(_get_field(cls, name, type_, kw_only))
 
     for f in cls_fields:
@@ -1121,33 +1093,25 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             else:
                 setattr(cls, f.name, f.default)
 
-    # Do we have any Field members that don't also have annotations?
     for name, value in cls.__dict__.items():
         if ((isinstance(value, (_Field, Field)) and value.type is None)) and not name in cls_annotations:
             raise TypeError('{0!r} is a field but has no type annotation'.format(name))
 
-    # Check rules that apply if we are derived from any dataclasses.
     if has_dataclass_bases:
         if any_frozen_base and not frozen:
             raise TypeError('cannot inherit non-frozen dataclass from a frozen one')
-
         if all_frozen_bases is False and frozen:
             raise TypeError('cannot inherit frozen dataclass from a non-frozen one')
 
-    # Remember all of the fields on our class (including bases).
     setattr(cls, _FIELDS, fields)
 
-    # Was this class defined with an explicit __hash__?
     class_hash = cls.__dict__.get('__hash__', MISSING)
     has_explicit_hash = not (class_hash is MISSING or
                              (class_hash is None and '__eq__' in cls.__dict__))
 
-    # If we're generating ordering methods, we must be generating the
-    # eq methods.
     if order and not eq:
         raise ValueError('eq must be true if order is true')
 
-    # Include InitVars and regular fields (so, not ClassVars).
     all_init_fields = [f for f in fields.values()
                        if f._field_type in (_FIELD, _FIELD_INITVAR)]
     (std_init_fields,
@@ -1155,14 +1119,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     func_builder = _FuncBuilder(globals)
 
-    # Save any custom __init__ annotations for docstring generation
     custom_init_annotations = None
     if '__init__' in cls.__dict__:
         try:
             init_func = cls.__dict__['__init__']
-            # On Python 3.14+ with PEP 649, __annotations__ may be lazy via __annotate__.
-            # Use FORWARDREF format so unresolvable forward refs (like 'X') don't raise —
-            # we only need the names for the docstring signature.
             if _annotationlib is not None and hasattr(init_func, '__annotate__'):
                 try:
                     custom_init_annotations = _annotationlib.get_annotations(
@@ -1170,7 +1130,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                 except Exception:
                     pass
             if custom_init_annotations is None:
-                # Pre-PEP-649: read directly from __dict__
                 try:
                     func_dict = object.__getattribute__(init_func, '__dict__')
                     if '__annotations__' in func_dict:
@@ -1178,7 +1137,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                 except (AttributeError, TypeError):
                     pass
             if custom_init_annotations is None:
-                # Last resort
                 try:
                     ann = getattr(init_func, '__annotations__', None)
                     if ann:
@@ -1189,39 +1147,29 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             pass
 
     if init:
-        # Does this class have a post-init function?
         has_post_init = hasattr(cls, _POST_INIT_NAME)
-
         attach_debug_function(cls, *_init_fn(all_init_fields,
-                 std_init_fields,
-                 kw_only_init_fields,
-                 frozen,
-                 has_post_init,
-                 '__dataclass_self__' if 'self' in fields else 'self',
-                 func_builder,
-                 slots,
-                 ))
-
+                                             std_init_fields,
+                                             kw_only_init_fields,
+                                             frozen,
+                                             has_post_init,
+                                             '__dataclass_self__' if 'self' in fields else 'self',
+                                             func_builder,
+                                             slots,
+                                             ))
 
     _set_new_attribute(cls, '__replace__', _replace)
 
-    # Get the fields as a list, and include only real fields.
     field_list = [f for f in fields.values() if f._field_type is _FIELD]
 
     if repr:
         flds = [f for f in field_list if f.repr]
-
         if flds:
-            # Build the field format string: x={0!r}, y={1!r}, z={2!r}
             field_formats = []
             for i, f in enumerate(flds):
-                field_formats.append('{0}={{{1}!r}}'.format(f.name, i + 1))  # offset by 1
+                field_formats.append('{0}={{{1}!r}}'.format(f.name, i + 1))
             repr_fmt = ', '.join(field_formats)
-
-            # Build the self.field references
             field_refs = ', '.join(['self.{0}'.format(f.name) for f in flds])
-
-            # Build the code directly - construct the string without nested format() calls
             body_line = '  return "{cls}({fields})".format(self.__class__.__qualname__, {field_refs})'.format(
                 cls='{0}',
                 fields=repr_fmt,
@@ -1234,26 +1182,25 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             decorator = None
 
         attach_debug_function(cls, *func_builder.add_fn('__repr__',
-                            ('self',),
-                            body,
-                            locals={'__dataclasses_recursive_repr':  recursive_repr, '__dataclasses_actual_recursive_repr': actual_recursive_repr},
-                            decorator=decorator))
+                                                        ('self',),
+                                                        body,
+                                                        locals={'__dataclasses_recursive_repr': recursive_repr,
+                                                                '__dataclasses_actual_recursive_repr': actual_recursive_repr},
+                                                        decorator=decorator))
 
     if eq:
-        # Create __eq__ method.
-        cmp_fields = [field for field in field_list if field.compare]
-        terms = ['self.{0}==other.{0}'.format(field.name) for field in cmp_fields]
+        cmp_fields = [f for f in field_list if f.compare]
+        terms = ['self.{0}==other.{0}'.format(f.name) for f in cmp_fields]
         field_comparisons = ' and '.join(terms) or 'True'
         attach_debug_function(cls, *func_builder.add_fn('__eq__',
-                            ('self', 'other'),
-                            ['  if self is other:',
-                             '   return True',
-                             '  if other.__class__ is self.__class__:',
-                             '   return {0}'.format(field_comparisons),
-                             '  return NotImplemented']))
+                                                        ('self', 'other'),
+                                                        ['  if self is other:',
+                                                         '   return True',
+                                                         '  if other.__class__ is self.__class__:',
+                                                         '   return {0}'.format(field_comparisons),
+                                                         '  return NotImplemented']))
 
     if order:
-        # Create and set the ordering methods.
         flds = [f for f in field_list if f.compare]
         self_tuple = _tuple_str('self', flds)
         other_tuple = _tuple_str('other', flds)
@@ -1268,14 +1215,11 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
     elif six.PY2 and eq:
-        # In Python 2, we need to explicitly prevent comparisons when order=False but eq=True
-        # In Python 3, this is automatic, but in Py2 objects can be compared by default
         for name, op in [('__lt__', '<'),
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
             error_msg = "'{}' not supported between instances of '{{1}}' and '{{0}}'".format(op)
-
             body = [
                 "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
             ]
@@ -1287,7 +1231,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
 
-    # Decide if/how we're going to create a hash function.
     hash_action = _hash_action[bool(unsafe_hash),
     bool(eq),
     bool(frozen),
@@ -1295,21 +1238,14 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if hash_action:
         cls.__hash__ = hash_action(cls, field_list, func_builder)
 
-    # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
     if six.PY2:
         cls.__qualname__ = Qualname(cls)
 
-    # Create a class doc-string.
     doc_attr = getattr(cls, '__doc__')
     if doc_attr is None:
-        # Generate signature-style docstring
         sig_fields = []
-
-        # Check if we have saved custom __init__ annotations
         if custom_init_annotations:
-            # Use annotations from the custom __init__ that was provided.
-            # ForwardRef objects (e.g. unresolvable 'X') render as their string arg.
             for param_name, param_type in custom_init_annotations.items():
                 if param_name != 'return':
                     if (_annotationlib is not None
@@ -1321,7 +1257,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                         type_str = _get_type_str(param_type)
                     sig_fields.append('{}:{}'.format(param_name, type_str))
         else:
-            # Check if init=False and we have custom __init__ annotations
             if not init and hasattr(cls, '__init__'):
                 try:
                     init_annotations = getattr(cls.__init__, '__annotations__', {})
@@ -1331,16 +1266,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                 type_str = _get_type_str(param_type)
                                 sig_fields.append('{}:{}'.format(param_name, type_str))
                 except (AttributeError, TypeError, NameError):
-                    # If we can't get annotations, fall back to generated fields
                     pass
-
-            # If we still don't have sig_fields, use generated fields
             if not sig_fields:
-                # Use generated fields
                 for f in std_init_fields:
                     type_str = _get_type_str(f.type)
-
-                    # Format field with or without default
                     if f.default is not MISSING:
                         if f.default is None:
                             default_str = 'None'
@@ -1354,10 +1283,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                     else:
                         sig_fields.append('{}:{}'.format(f.name, type_str))
 
-        # in python 2 `cls.__doc__ = "smth"` causes an exception, so we update doc only if it were already there.
         if six.PY3 or doc_attr is not None:
-            # Check if the metaclass has a custom __call__ method (not inherited from type)
-            # If it does, we shouldn't include the signature
             metaclass = type(cls)
             has_custom_call = False
             if metaclass is not type and '__call__' in metaclass.__dict__:
@@ -1366,19 +1292,15 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             if sig_fields and not has_custom_call:
                 cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
             elif has_custom_call:
-                # Don't include parentheses for classes with custom metaclass __call__
                 cls.__doc__ = cls.__name__
             else:
-                # No fields but normal metaclass - include empty parentheses
                 cls.__doc__ = '{}()'.format(cls.__name__)
+
     if match_args:
         _set_new_attribute(cls, '__match_args__',
                            tuple(f.name for f in std_init_fields))
 
-    # Auto-enable slots if inheriting directly from a non-dataclass with __slots__
-    # This prevents the child from inheriting the parent's __slots__ value
     if not slots:
-        # Check only direct parent bases, not grandparents
         for base in cls.__bases__:
             for k,v in base.__dict__.items():
                 if isinstance(v, (Field, _Field)):
@@ -1386,12 +1308,9 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                         v.__set_name__(base, k)
             base_params = getattr(base, _PARAMS, None)
             if base_params is None and '__slots__' in base.__dict__:
-                # Direct base is not a dataclass but has slots, auto-create slots
-                # to avoid inheriting parent's __slots__
                 slots = True
                 break
 
-    # It's an error to specify weakref_slot if slots is False.
     if weakref_slot and not slots:
         raise TypeError('weakref_slot is True but slots is False')
     # ...existing code...
@@ -1400,11 +1319,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     #abc.abstractmethod()
     update_abstractmethods(cls)
 
-    # Add __annotate__ method for PEP 649 compatibility (Python 3.14+)
     if _annotationlib is not None:
-        # Only add if not already present (allow custom implementations)
         if not hasattr(cls, '__annotate__') or getattr(cls, '__annotate__', None) is None:
-            # Build list of field names for annotation
             annotation_field_names = [f.name for f in fields.values()]
             cls.__annotate__ = _make_annotate_function(
                 cls, '__annotate__', annotation_field_names, MISSING)
@@ -1416,15 +1332,12 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     return cls
 
 
-# _dataclass_getstate and _dataclass_setstate are needed for pickling frozen
-# classes with slots.
 def _dataclass_getstate(self):
     return [getattr(self, f.name) for f in fields(self)]
 
 
 def _dataclass_setstate(self, state):
     for field, value in zip(fields(self), state):
-        # use setattr because dataclass may be frozen
         object.__setattr__(self, field.name, value)
 
 
@@ -1441,8 +1354,6 @@ def _get_slots(cls):
     elif isinstance(slots_val, str):
         yield slots_val
     elif hasattr(slots_val, '__iter__'):
-        # Check if it's an iterator (has __next__ or next method)
-        # In Python 2, iterators have 'next' method; in Python 3, they have '__next__'
         if hasattr(slots_val, '__next__') or hasattr(slots_val, 'next'):
             raise TypeError("Slots of '{0}' cannot be determined".format(cls.__name__))
         try:
@@ -1455,14 +1366,12 @@ def _get_slots(cls):
 
 
 def _update_func_cell_for__class__(f, oldcls, newcls):
-    # Returns True if we update a cell, else False.
     if f is None:
         return False
     try:
         idx = f.__code__.co_freevars.index("__class__")
     except ValueError:
         return False
-    # Fix the cell to point to the new class
     closure = f.__closure__[idx]
     if closure.cell_contents is oldcls:
         closure.cell_contents = newcls
@@ -1471,51 +1380,34 @@ def _update_func_cell_for__class__(f, oldcls, newcls):
 
 
 def _clear_forwardref_owners(obj, oldcls):
-    """Recursively clear ForwardRef owners to break circular references.
-
-    This is needed to allow the original class to be garbage collected
-    when slots=True (gh-135228).
-    """
     if _annotationlib is None:
         return
-
-    # Handle ForwardRef objects
     if isinstance(obj, _annotationlib.ForwardRef):
-        # Clear the owner if it points to the old class
         if getattr(obj, '__owner__', None) is oldcls:
             try:
                 object.__setattr__(obj, '__owner__', None)
             except (AttributeError, TypeError):
                 pass
         return
-
-    # Handle generic types with __args__
     if hasattr(obj, '__args__'):
         for arg in obj.__args__:
             _clear_forwardref_owners(arg, oldcls)
-
-    # Handle Union and similar types
     if hasattr(obj, '__origin__'):
         _clear_forwardref_owners(obj.__origin__, oldcls)
 
 
 def _create_slots(defined_fields, inherited_slots, field_names, weakref_slot):
-    # The slots for our class.
     seen_docs = False
     slots = OrderedDict()
-
     items_to_check = list(field_names)
     if weakref_slot:
         items_to_check.append('__weakref__')
-
     for slot in items_to_check:
         if slot not in inherited_slots:
             doc = getattr(defined_fields.get(slot), 'doc', None)
             if doc is not None:
                 seen_docs = True
             slots[slot] = doc
-
-    # We only return dict if there's at least one doc member
     if seen_docs:
         return slots
     return tuple(slots.keys())
@@ -1528,26 +1420,18 @@ class Qualname(object):
 
 
 def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
-    # Need to create a new class, since we can't set __slots__ after a
-    # class has been created.
-
-    # Make sure __slots__ isn't already set.
     if '__slots__' in cls.__dict__:
         raise TypeError('{0} already specifies __slots__'.format(cls.__name__))
 
-    # gh-135228: Clear type descriptors so the original class can be GC'd.
     if hasattr(sys, '_clear_type_descriptors'):
         sys._clear_type_descriptors(cls)
 
-    # Create a new dict for our new class.
     cls_dict = dict(cls.__dict__)
     field_names = tuple(f.name for f in fields(cls))
 
-    # Filter stale descriptors that will be recreated by the new class.
     cls_dict.pop('__weakref__', None)
     cls_dict.pop('__dict__', None)
 
-    # Make sure slots don't overlap with those in base classes.
     inherited_slots = set()
     for base in cls.__mro__[1:-1]:
         inherited_slots.update(_get_slots(base))
@@ -1559,15 +1443,13 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     for field_name in field_names:
         cls_dict.pop(field_name, None)
 
-    # And finally create the class.
     if six.PY2:
         qual_name = getattr(cls, '__qualname__', qualname(cls))
     else:
         qual_name = cls.__qualname__
-    # Use types.new_class() for Generic classes to support MRO entry resolution
+
     bases = cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__
     if typing.Generic in cls.__bases__ or any(hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
-        # Use types.new_class() for classes with __mro_entries__ (like Generic)
         def exec_body(ns):
             ns.update(cls_dict)
         newcls = _make_class(cls.__name__, bases, exec_body=exec_body) #types.new_class(cls.__name__, bases, exec_body=exec_body)
@@ -1577,12 +1459,10 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     if qual_name is not None: # and getattr(newcls, "__qualname__", None):
         newcls.__qualname__ = qual_name
 
-    # gh-135228: Copy __firstlineno__ so GC-based class identity checks work.
     if hasattr(cls, '__firstlineno__'):
         newcls.__firstlineno__ = cls.__firstlineno__
 
     if is_frozen:
-        # Need this for pickling frozen classes with slots.
         if '__getstate__' not in cls_dict:
             newcls.__getstate__ = _dataclass_getstate
         if '__setstate__' not in cls_dict:
@@ -1692,23 +1572,12 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
                               frozen, match_args, kw_only, slots,
                               weakref_slot)
 
-    # See if we're being called as @dataclass or @dataclass().
     if cls is None:
-        # We're called with parens.
         return wrap
-
-    # We're called as @dataclass without parens.
     return wrap(cls)
 
 
 def fields(class_or_instance):
-    """Return a tuple describing the fields of this dataclass.
-
-    Accepts a dataclass or an instance of one. Tuple elements are of
-    type Field.
-    """
-
-    # Might it be worth caching this, per class?
     try:
         fields = getattr(class_or_instance, _FIELDS)
     except AttributeError:
@@ -1726,13 +1595,10 @@ def fields(class_or_instance):
 
 
 def _is_dataclass_instance(obj):
-    """Returns True if obj is an instance of a dataclass."""
     return hasattr(type(obj), _FIELDS)
 
 
 def is_dataclass(obj):
-    """Returns True if obj is a dataclass or an instance of a
-    dataclass."""
     cls = obj if isinstance(obj, type) else type(obj)
     return hasattr(cls, _FIELDS)
 
@@ -1740,24 +1606,6 @@ def is_dataclass(obj):
 _default_dict_factory = dict if sys.version_info >= (3, 7) else OrderedDict
 
 def asdict(obj, dict_factory=_default_dict_factory):
-    """Return the fields of a dataclass instance as a new dictionary mapping
-    field names to field values.
-
-    Example usage:
-
-      @dataclass
-      class C:
-          x = None  # with __annotations__ = {'x': int, 'y': int}
-          y = None
-
-      c = C(1, 2)
-      assert asdict(c) == {'x': 1, 'y': 2}
-
-    If given, 'dict_factory' will be used instead of built-in dict.
-    The function applies recursively to field values that are
-    dataclass instances. This will also look into built-in containers:
-    tuples, lists, and dicts. Other objects are copied with 'copy.deepcopy()'.
-    """
     if not _is_dataclass_instance(obj):
         raise TypeError("asdict() should be called on dataclass instances")
     return _asdict_inner(obj, dict_factory)
@@ -1768,7 +1616,6 @@ def _asdict_inner(obj, dict_factory):
     if obj_type in _ATOMIC_TYPES:
         return obj
     elif hasattr(obj_type, _FIELDS):
-        # dataclass instance: fast path for the common case
         if dict_factory is dict:
             return {
                 f.name: _asdict_inner(getattr(obj, f.name), dict)
@@ -1779,7 +1626,6 @@ def _asdict_inner(obj, dict_factory):
                 (f.name, _asdict_inner(getattr(obj, f.name), dict_factory))
                 for f in fields(obj)
             ])
-    # handle the builtin types first for speed
     elif obj_type is list:
         return [_asdict_inner(v, dict_factory) for v in obj]
     elif obj_type is dict:
@@ -1791,13 +1637,11 @@ def _asdict_inner(obj, dict_factory):
         return tuple([_asdict_inner(v, dict_factory) for v in obj])
     elif issubclass(obj_type, tuple):
         if hasattr(obj, '_fields'):
-            # obj is a namedtuple
             return obj_type(*[_asdict_inner(v, dict_factory) for v in obj])
         else:
             return obj_type(_asdict_inner(v, dict_factory) for v in obj)
     elif issubclass(obj_type, dict):
         if hasattr(obj_type, 'default_factory'):
-            # obj is a defaultdict
             result = obj_type(obj.default_factory)
             for k, v in obj.items():
                 result[_asdict_inner(k, dict_factory)] = _asdict_inner(v, dict_factory)
@@ -1812,24 +1656,6 @@ def _asdict_inner(obj, dict_factory):
 
 
 def astuple(obj, tuple_factory=tuple):
-    """Return the fields of a dataclass instance as a new tuple of field values.
-
-    Example usage:
-
-      @dataclass
-      class C:
-          x = None  # with __annotations__ = {'x': int, 'y': int}
-          y = None
-
-      c = C(1, 2)
-      assert astuple(c) == (1, 2)
-
-    If given, 'tuple_factory' will be used instead of built-in tuple.
-    The function applies recursively to field values that are
-    dataclass instances. This will also look into built-in containers:
-    tuples, lists, and dicts. Other objects are copied with 'copy.deepcopy()'.
-    """
-
     if not _is_dataclass_instance(obj):
         raise TypeError("astuple() should be called on dataclass instances")
     return _astuple_inner(obj, tuple_factory)
@@ -1844,14 +1670,12 @@ def _astuple_inner(obj, tuple_factory):
             for f in fields(obj)
         ])
     elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
-        # obj is a namedtuple
         return type(obj)(*[_astuple_inner(v, tuple_factory) for v in obj])
     elif isinstance(obj, (list, tuple)):
         return type(obj)(_astuple_inner(v, tuple_factory) for v in obj)
     elif isinstance(obj, dict):
         obj_type = type(obj)
         if hasattr(obj_type, 'default_factory'):
-            # obj is a defaultdict
             result = obj_type(getattr(obj, 'default_factory'))
             for k, v in obj.items():
                 result[_astuple_inner(k, tuple_factory)] = _astuple_inner(v, tuple_factory)
@@ -1877,44 +1701,23 @@ def _make_class(name, bases=(), kwds=None, exec_body=None):
 
 
 def make_dataclass(
-        cls_name, # type: str
-        fields, # type: typing.Iterable[typing.Union[str, typing.Tuple[str, typing.Any], typing.Tuple[str, typing.Any, typing.Any]]]
-        bases=(), # type: typing.Tuple[type, ...]
-        namespace=None, # type: typing.Optional[typing.Dict[str, typing.Any]]
-        init=True, # type: bool
-        repr=True, # type: bool
-        eq=True, # type: bool
-        order=False, # type: bool
-        unsafe_hash=False, # type: bool
-        frozen=False, # type: bool
-        match_args=True, # type: bool
-        kw_only=False, # type: bool
-        slots=False, # type: bool
-        weakref_slot=False, # type: bool
-        module=None, # type: typing.Optional[str],
-        decorator=dataclass # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
+        cls_name,
+        fields,
+        bases=(),
+        namespace=None,
+        init=True,
+        repr=True,
+        eq=True,
+        order=False,
+        unsafe_hash=False,
+        frozen=False,
+        match_args=True,
+        kw_only=False,
+        slots=False,
+        weakref_slot=False,
+        module=None,
+        decorator=dataclass
 ):
-    # type: (...) -> type
-
-    """Return a new dynamically created dataclass.
-
-    The dataclass name will be 'cls_name'.  'fields' is an iterable
-    of either (name), (name, type) or (name, type, Field) objects. If type is
-    omitted, use the string 'typing.Any'.  Field objects are created by
-    the equivalent of calling 'field(name, type [, Field-info])'.
-
-      C = make_dataclass('C', ['x', ('y', int), ('z', int, field(init=False))], bases=(Base,))
-
-    is equivalent to:
-
-      @dataclass
-      class C(Base):
-          # with __annotations__ = {'x': 'typing.Any', 'y': int, 'z': int}
-          z = field(init=False)
-
-    For the bases and namespace parameters, see the builtin type() function.
-    """
-
     if decorator is None:
         decorator = dataclass
 
@@ -1925,8 +1728,6 @@ def make_dataclass(
     else:
         print("WARNING: wtf is `namespace`?" ,namespace, file=sys.stderr)
 
-
-    # Validate field names
     seen = set()
     annotations = OrderedDict()
     defaults = OrderedDict()
@@ -1957,17 +1758,15 @@ def make_dataclass(
     resolved_annotations = OrderedDict()
     for name, tp in annotations.items():
         if tp is _ANY_MARKER:
-            # Check if typing is already imported
             if 'typing' in sys.modules:
                 resolved_annotations[name] = sys.modules['typing'].Any
             else:
-                # Keep the marker for now, will be resolved in _process_class
                 resolved_annotations[name] = _ANY_MARKER
         else:
             resolved_annotations[name] = tp
     namespace['__annotations__'] = resolved_annotations
-    value_blocked = [True]  # mutable for closure
-    # Update namespace
+    value_blocked = [True]
+
     def annotate_method(format=None):
         if six.PY2 or not _annotationlib:
             def get_any():
@@ -2001,11 +1800,10 @@ def make_dataclass(
     def exec_body_callback(ns):
         ns.update(namespace)
         ns.update(defaults)
-    # Create the class
+
     cls = _make_class(cls_name, bases, OrderedDict(), exec_body_callback)
     cls.__annotate__ = annotate_method
 
-    # Set module
     if module is None:
         try:
             module = sys._getframe(1).f_globals.get('__name__', '__main__')
@@ -2014,14 +1812,11 @@ def make_dataclass(
     if module is not None:
         cls.__module__ = module
 
-    # Apply the decorator
     cls = decorator(cls, init=init, repr=repr, eq=eq, order=order,
                     unsafe_hash=unsafe_hash, frozen=frozen,
                     match_args=match_args, kw_only=kw_only, slots=slots,
                     weakref_slot=weakref_slot)
 
-    # Unblock VALUE format AFTER decorator processing
-    # (decorator's _process_class calls get_annotations which tries VALUE first)
     if _annotationlib is not None:
         value_blocked[0] = False
 
@@ -2029,44 +1824,23 @@ def make_dataclass(
 
 
 def replace(obj, **changes):
-    """Return a new object replacing specified fields with new values.
-
-    This is especially useful for frozen classes.  Example usage:
-
-      @dataclass(frozen=True)
-      class C:
-          x = None  # with __annotations__ = {'x': int, 'y': int}
-          y = None
-
-      c = C(1, 2)
-      c1 = replace(c, x=3)
-      assert c1.x == 3 and c1.y == 2
-    """
     if not _is_dataclass_instance(obj):
         raise TypeError("replace() should be called on dataclass instances")
     return _replace(obj, **changes)
 
 
 def _replace(self, **changes):
-    # We're going to mutate 'changes', but that's okay because it's a
-    # new dict, even if called with 'replace(self, **my_changes)'.
-
     for f in getattr(self, _FIELDS).values():
-        # Only consider normal fields or InitVars.
         if f._field_type is _FIELD_CLASSVAR:
             continue
-
         if not f.init:
-            # Error if this field is specified in changes.
             if f.name in changes:
                 raise TypeError('field {0} is declared with init=False, '
                                 'it cannot be specified with replace()'.format(f.name))
             continue
-
         if f.name not in changes:
             if f._field_type is _FIELD_INITVAR and f.default is MISSING:
                 raise TypeError("InitVar {0!r} must be specified with replace()".format(f.name))
             changes[f.name] = getattr(self, f.name)
 
-    # Create the new object
     return self.__class__(**changes)
