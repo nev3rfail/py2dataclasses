@@ -1124,7 +1124,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             field_refs = ', '.join(['self.{0}'.format(f.name) for f in flds])
 
             # Build the code directly - construct the string without nested format() calls
-            body_line = '  return "{cls}({fields})".format(self.__class__.__name__, {field_refs})'.format(
+            body_line = '  return "{cls}({fields})".format(self.__qualname__, {field_refs})'.format(
                 cls='{0}',
                 fields=repr_fmt,
                 field_refs=field_refs
@@ -1132,7 +1132,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             body = [body_line]
             decorator = "@__dataclasses_recursive_repr()"
         else:
-            body = ['  return self.__class__.__name__ + "()"']
+            body = ['  return self.__qualname__ + "()"']
             decorator = None
 
         attach_debug_function(cls, *func_builder.add_fn('__repr__',
