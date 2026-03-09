@@ -276,7 +276,7 @@ class TestCase(unittest.TestCase):
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
         for f in the_fields:
-            self.assertIn(type(f), [_Field, _oneshot])
+            self.assertIn(type(f), [Field, _oneshot])
             self.assertIn(f.name, C.__annotations__)
 
         self.assertEqual(len(the_fields), 3)
