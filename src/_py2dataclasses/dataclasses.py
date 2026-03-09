@@ -1208,10 +1208,11 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             else:
                 sig_fields.append('{}:{}'.format(f.name, type_str))
 
-        if sig_fields:
-            cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
-        else:
-            cls.__doc__ = '{}()'.format(cls.__name__)
+        if six.PY3 or doc_attr is not None:
+            if sig_fields:
+                cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
+            else:
+                cls.__doc__ = '{}()'.format(cls.__name__)
     if match_args:
         _set_new_attribute(cls, '__match_args__',
                            tuple(f.name for f in std_init_fields))
