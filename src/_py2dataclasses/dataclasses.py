@@ -1114,7 +1114,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
         #if flds:
         body = ['  return "{0}({1})".format({2})'.format(
-            cls.__qualname__ if sys.version_info >= (3,) else cls.__name__,
+            cls.__qualname__ if sys.version_info >= (3,) else qualname(cls),
             repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
             ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
         ).replace(".format()", "")]
@@ -1366,7 +1366,7 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
         # Use types.new_class() for classes with __mro_entries__ (like Generic)
         def exec_body(ns):
             ns.update(cls_dict)
-        newcls = types.new_class(cls.__name__, bases, exec_body=exec_body)
+        newcls = _make_class(cls.__name__, bases, exec_body=exec_body) #types.new_class(cls.__name__, bases, exec_body=exec_body)
     else:
         newcls = type(cls)(cls.__name__, bases, cls_dict)
 
@@ -1659,7 +1659,8 @@ def _make_class(name, bases=(), kwds=None, exec_body=None):
         cls = fn(name, bases, kwds, exec_body)
     else:
         namespace = OrderedDict()
-        namespace.update(kwds)
+        if kwds:
+            namespace.update(kwds)
         if exec_body:
             exec_body(namespace)
         cls = type(name, bases, namespace)

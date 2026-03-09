@@ -19,7 +19,7 @@ try:
 except ImportError:
     pass
 
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
@@ -205,7 +205,7 @@ class TestCase(unittest.TestCase):
         class C(object):
             #__annotations__ = {'x': int, 'y': int}
             x = field(int, 0)
-            y = field(compare=False, default=4)
+            y = field(int, compare=False, default=4)
 
         self.assertEqual(C(), C(0, 20))
         self.assertEqual(C(1, 10), C(1, 20))
@@ -276,7 +276,7 @@ class TestCase(unittest.TestCase):
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
         for f in the_fields:
-            self.assertIn(type(f), [_Field, _oneshot])
+            self.assertIn(type(f), [_Field, Field])
             self.assertIn(f.name, C.__annotations__)
 
         self.assertEqual(len(the_fields), 3)
@@ -1256,7 +1256,7 @@ class TestCase(unittest.TestCase):
             y = field(int, 0)
             z = field(int, 0)
         self.assertNotEqual(Point3D(0, 0, 0), Point3Dv1())
-    @unittest.skip(" we can't check this in pyton 2")
+    #@unittest.skip(" we can't check this in pyton 2")
     def test_function_annotations(self):
         # Some dummy class and instance to use as a default.
         class F(object):
@@ -1805,7 +1805,7 @@ class TestCase(unittest.TestCase):
         c = C(10, 11, 50, 51)
         self.assertEqual(vars(c), {'x': 21, 'y': 101})
 
-    @unittest.skip("property overwrites Field descriptor in py2dataclasses")
+    #@unittest.skip("property overwrites Field descriptor in py2dataclasses")
     def test_init_var_name_shadowing(self):
         # Shadowing an InitVar with a property
         
@@ -2302,7 +2302,11 @@ class TestCase(unittest.TestCase):
         try:
             fields(object)
         except TypeError as exc:
-            traceback.print_exc(file=stdout)
+            s = traceback.format_exc(10)
+            if not isinstance(s, type(u'')):
+                s = s.decode("utf-8")
+            print(s, file=stdout)
+            #traceback.print_exception(type(exc), exc, sys.exc_info()[2], file=stdout)
         printed_traceback = stdout.getvalue()
         self.assertNotIn("AttributeError", printed_traceback)
         self.assertNotIn("__dataclass_fields__", printed_traceback)
@@ -2811,7 +2815,7 @@ class TestDocString(unittest.TestCase):
         # Because 3.6 and 3.7 differ in how inspect.signature work
         #  (see bpo #32108), for the time being just compare them with
         #  whitespace stripped.
-        self.assertEqual(a.replace(' ', ''), b.replace(' ', ''))
+        self.assertEqual((a or "").replace(' ', ''), b.replace(' ', ''))
 
     def test_existing_docstring_not_overridden(self):
         @dataclass
