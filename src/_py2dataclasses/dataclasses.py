@@ -60,11 +60,12 @@ import keyword
 import itertools
 import weakref
 from collections import OrderedDict
+from types import NoneType
 
 import six
 
 from .abc_utils import update_abstractmethods
-from .type_utils import make_alias, _get_type_str, MISSING
+from .type_utils import make_alias, _get_type_str, MISSING, _MISSING_TYPE
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 
@@ -340,13 +341,13 @@ class _Field(object):
                  metadata, kw_only, doc, **kwargs):
         self.order = _Field._counter
         _Field._counter += 1
-        self.name = None
+        self.name = None  # type: typing.Optional[str]
         self.default = default
         self.default_factory = default_factory
-        self.init = init
-        self.repr = repr
-        self.hash = hash
-        self.compare = compare
+        self.init = init  # type: bool
+        self.repr = repr  # type: bool
+        self.hash = hash  # type: bool
+        self.compare = compare  # type: bool
         if metadata is None:
             self.metadata = _EMPTY_METADATA
         else:
@@ -474,8 +475,9 @@ def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
 
     if default is not MISSING and default_factory is not MISSING:
         raise ValueError('cannot specify both default and default_factory')
-    return _cls(default, default_factory, init, repr, hash, compare,
+    f = _cls(default, default_factory, init, repr, hash, compare,
                 metadata, kw_only, doc)
+    return f
 
 
 def of(_typ):
@@ -486,15 +488,15 @@ T = typing.TypeVar("T")
 
 
 def field(
-        _typ=MISSING,  # type: typing.Type[T]
-        default=MISSING,  # type: typing.Optional[T]
-        default_factory=MISSING,  # type: typing.Optional[typing.Callable[[], T]]
+        _typ,  # type: typing.Type[T]
+        default=MISSING,  # type: typing.Union[T, _MISSING_TYPE]
+        default_factory=MISSING,  # type: typing.Union[typing.Callable[[], T], _MISSING_TYPE]
         init=True,  # type: bool
         repr=True,  # type: bool
         hash=None,  # type: typing.Optional[bool]
         compare=True,  # type: bool
         metadata=None,  # type: typing.Optional[typing.Mapping[typing.Any, typing.Any]]
-        kw_only=MISSING,  # type: typing.Union[bool, typing.Any]
+        kw_only=MISSING,  # type: typing.Union[bool, _MISSING_TYPE]
         doc=None,  # type: typing.Optional[str]
         **kwargs
 ):
