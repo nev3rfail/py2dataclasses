@@ -1,3 +1,4 @@
+# coding=utf-8
 from __future__ import print_function, absolute_import
 import abc
 import functools
@@ -37,120 +38,126 @@ except ImportError:
 
 # Sentinel for make_dataclass to avoid eagerly importing typing.Any
 _ANY_MARKER = object()
-
 if _annotationlib is not None:
+    def _evaluate_annotation(ann, globals_dict):
+        """Evaluate a single annotation, raising NameError for unresolvable refs.
+        Handles strings, ForwardRefs, and generic aliases with inner ForwardRefs."""
+        if isinstance(ann, str):
+            return eval(ann, globals_dict)
+        elif isinstance(ann, _annotationlib.ForwardRef):
+            if hasattr(_annotationlib, 'evaluate_forward_ref'):
+                return _annotationlib.evaluate_forward_ref(
+                    ann, globals=globals_dict, locals=globals_dict)
+            elif hasattr(typing, 'evaluate_forward_ref'):
+                return typing.evaluate_forward_ref(
+                    ann, globalns=globals_dict, localns=globals_dict)
+            else:
+                # Deprecated path - pass type_params to suppress DeprecationWarning
+                try:
+                    return ann._evaluate(globals_dict, globals_dict,
+                                         type_params=(), recursive_guard=frozenset())
+                except TypeError:
+                    return ann._evaluate(globals_dict, globals_dict,
+                                         recursive_guard=frozenset())
+        elif hasattr(ann, '__args__') and ann.__args__:
+            # Generic alias like list[ForwardRef('undefined')]:
+            # evaluate inner args to trigger NameError for unresolvable refs.
+            for arg in ann.__args__:
+                _evaluate_annotation(arg, globals_dict)
+            return ann
+        return ann
+
     def _make_annotate_function(__class__, method_name, annotation_fields, return_type, field_annotations=None):
         """Create an __annotate__ function for a generated dataclass method (PEP 649)."""
-        # Capture the class's globals at function creation time
         if __class__.__module__ in sys.modules:
             __class_globals__ = sys.modules[__class__.__module__].__dict__
         else:
-            # If module doesn't exist, use builtins
             __class_globals__ = {}
             if isinstance(__builtins__, dict):
                 __class_globals__.update(__builtins__)
             else:
                 __class_globals__.update(__builtins__.__dict__)
 
-        # If field_annotations is provided, use it; otherwise, we'll look them up from the class
-        __field_annotations__ = field_annotations if field_annotations is not None else {}
-
         def __annotate__(format):
             Format = _annotationlib.Format
             if format in (Format.VALUE, Format.FORWARDREF, Format.STRING):
-                # Get annotations from the class, handling all bases
-                # Avoid using normal attribute access to prevent recursion
+                # Re-fetch class annotations DYNAMICALLY from the live __annotate__
+                # so that if __class__.__annotate__ is replaced after class creation,
+                # we reflect the new state (fixes test_incomplete_annotations / gh-142214).
                 cls_annotations = {}
-                for base in reversed(__class__.__mro__):
-                    try:
-                        base_dict = object.__getattribute__(base, '__dict__')
-                        if '__annotations__' in base_dict:
-                            base_annotations = base_dict['__annotations__']
-                            if base_annotations:
-                                cls_annotations.update(base_annotations)
-                    except AttributeError:
-                        pass
-
-                # Fall back to captured annotations if not found dynamically
-                for k, v in __field_annotations__.items():
-                    if k not in cls_annotations:
-                        cls_annotations[k] = v
+                try:
+                    live_annotate = __class__.__annotate__
+                    if getattr(live_annotate, '__generated_by_dataclasses__', False):
+                        # Our own annotate: use FORWARDREF to avoid infinite recursion
+                        cls_annotations = live_annotate(Format.FORWARDREF)
+                    else:
+                        # User-replaced annotate: call with FORWARDREF (never raises NameError)
+                        try:
+                            cls_annotations = live_annotate(Format.FORWARDREF)
+                        except Exception:
+                            cls_annotations = {}
+                except Exception:
+                    # Fall back: scan MRO __dict__ directly
+                    for base in reversed(__class__.__mro__):
+                        try:
+                            base_dict = object.__getattribute__(base, '__dict__')
+                            if '__annotations__' in base_dict:
+                                base_annotations = base_dict['__annotations__']
+                                if base_annotations:
+                                    cls_annotations.update(base_annotations)
+                        except AttributeError:
+                            pass
 
                 new_annotations = OrderedDict()
 
-                # For VALUE format, evaluate forward references
                 if format == Format.VALUE:
-                    # For VALUE format, we need to evaluate ALL annotations to check for undefined refs
-                    # This means evaluating even fields that aren't in __init__
-                    # For VALUE format, we need to evaluate ALL annotations to check for undefined refs
-                    # This means evaluating even fields that aren't in __init__
+                    # Evaluate ALL class annotations — NameError propagates for any
+                    # unresolvable ref, even those not in annotation_fields (non-init fields).
+                    # This matches CPython behaviour: the __init__ annotate function must
+                    # raise NameError if any annotation in the class cannot be resolved,
+                    # regardless of whether that field participates in __init__.
                     for k, ann in cls_annotations.items():
-                        if isinstance(ann, str):
-                            try:
-                                # Evaluate the string annotation in the class's globals
-                                ann = eval(ann, __class_globals__)
-                            except NameError:
-                                # Re-raise NameError for unresolvable forward refs
-                                raise
-                        elif hasattr(_annotationlib, 'ForwardRef') and isinstance(ann, _annotationlib.ForwardRef):
-                            # If it's a ForwardRef, try to evaluate it
-                            try:
-                                ann = ann._evaluate(__class_globals__, __class_globals__, recursive_guard=frozenset())
-                            except NameError:
-                                raise
-                        elif hasattr(_annotationlib, 'ForwardRef') and isinstance(ann, _annotationlib.ForwardRef):
-                            # If it's a ForwardRef, try to evaluate it
-                            try:
-                                ann = ann._evaluate(__class_globals__, __class_globals__, recursive_guard=frozenset())
-                            except NameError:
-                                raise
+                        resolved = _evaluate_annotation(ann, __class_globals__)
                         if k in annotation_fields:
-                            new_annotations[k] = ann
+                            new_annotations[k] = resolved
                     if return_type is not MISSING:
                         new_annotations["return"] = return_type
 
-                # For FORWARDREF format, keep ForwardRefs but don't evaluate them
                 elif format == Format.FORWARDREF:
                     for k in annotation_fields:
                         if k in cls_annotations:
                             ann = cls_annotations[k]
-                            # Try to evaluate to see if it's valid
                             if isinstance(ann, str):
                                 try:
-                                    evaluated = eval(ann, __class_globals__)
-                                    new_annotations[k] = evaluated
+                                    new_annotations[k] = eval(ann, __class_globals__)
                                 except NameError:
-                                    # Keep as ForwardRef
                                     new_annotations[k] = _annotationlib.ForwardRef(ann, is_class=True)
                             else:
                                 new_annotations[k] = ann
+                    if return_type is not MISSING:
+                        new_annotations["return"] = return_type
 
-                # For STRING format, convert everything to strings
                 elif format == Format.STRING:
                     for k in annotation_fields:
                         if k in cls_annotations:
                             ann = cls_annotations[k]
                             if isinstance(ann, str):
                                 new_annotations[k] = ann
-                            elif hasattr(_annotationlib, 'ForwardRef') and isinstance(ann, _annotationlib.ForwardRef):
-                                # For ForwardRef, get the original string representation
+                            elif isinstance(ann, _annotationlib.ForwardRef):
                                 new_annotations[k] = ann.__forward_arg__
                             else:
                                 new_annotations[k] = _annotationlib.type_repr(ann)
-
-                if return_type is not MISSING:
-                    if format == Format.STRING:
+                    if return_type is not MISSING:
                         new_annotations["return"] = _annotationlib.type_repr(return_type)
-                    else:
-                        new_annotations["return"] = return_type
+
                 return new_annotations
             else:
                 raise NotImplementedError(format)
+
         __annotate__.__generated_by_dataclasses__ = True
         __annotate__.__qualname__ = '{0}.{1}.__annotate__'.format(
             __class__.__qualname__, method_name)
         return __annotate__
-
 def _get_annotations(cls):
     """Get class annotations safely, supporting deferred annotations (PEP 649)."""
     if _annotationlib is not None:
@@ -1171,13 +1178,31 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if '__init__' in cls.__dict__:
         try:
             init_func = cls.__dict__['__init__']
-            # Access __annotations__ dict directly using object.__getattribute__ to avoid triggering __annotate__
-            try:
-                func_dict = object.__getattribute__(init_func, '__dict__')
-                if '__annotations__' in func_dict:
-                    custom_init_annotations = func_dict['__annotations__']
-            except (AttributeError, TypeError):
-                pass
+            # On Python 3.14+ with PEP 649, __annotations__ may be lazy via __annotate__.
+            # Use FORWARDREF format so unresolvable forward refs (like 'X') don't raise —
+            # we only need the names for the docstring signature.
+            if _annotationlib is not None and hasattr(init_func, '__annotate__'):
+                try:
+                    custom_init_annotations = _annotationlib.get_annotations(
+                        init_func, format=_annotationlib.Format.FORWARDREF)
+                except Exception:
+                    pass
+            if custom_init_annotations is None:
+                # Pre-PEP-649: read directly from __dict__
+                try:
+                    func_dict = object.__getattribute__(init_func, '__dict__')
+                    if '__annotations__' in func_dict:
+                        custom_init_annotations = func_dict['__annotations__']
+                except (AttributeError, TypeError):
+                    pass
+            if custom_init_annotations is None:
+                # Last resort
+                try:
+                    ann = getattr(init_func, '__annotations__', None)
+                    if ann:
+                        custom_init_annotations = ann
+                except Exception:
+                    pass
         except (AttributeError, TypeError, NameError, KeyError):
             pass
 
@@ -1301,10 +1326,17 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
         # Check if we have saved custom __init__ annotations
         if custom_init_annotations:
-            # Use annotations from the custom __init__ that was provided
+            # Use annotations from the custom __init__ that was provided.
+            # ForwardRef objects (e.g. unresolvable 'X') render as their string arg.
             for param_name, param_type in custom_init_annotations.items():
                 if param_name != 'return':
-                    type_str = _get_type_str(param_type)
+                    if (_annotationlib is not None
+                            and isinstance(param_type, _annotationlib.ForwardRef)):
+                        type_str = param_type.__forward_arg__
+                    elif isinstance(param_type, str):
+                        type_str = param_type
+                    else:
+                        type_str = _get_type_str(param_type)
                     sig_fields.append('{}:{}'.format(param_name, type_str))
         else:
             # Check if init=False and we have custom __init__ annotations
