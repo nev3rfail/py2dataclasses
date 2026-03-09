@@ -1113,12 +1113,22 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         flds = [f for f in field_list if f.repr]
 
         if flds:
-            # Build the field format string: x={0!r}, y={1!r}, z={2!r}
-            repr_fmt = ', '.join(['{0}={{{1}!r}}'.format(f.name, i) for i, f in enumerate(flds)])
-            # Build the values to format: self.x, self.y, self.z
+            # Build the field format string with escaped braces
+            # We want the final code to be: return "ClassName(x={0!r}, y={1!r})".format(self.x, self.y)
+            field_formats = []
+            for i, f in enumerate(flds):
+                field_formats.append('{0}={{{1}!r}}'.format(f.name, i))
+            repr_fmt = ', '.join(field_formats)
+
+            # Build the values list
             field_values = ', '.join(['self.{0}'.format(f.name) for f in flds])
-            # Generate code that calls format at runtime
-            body = ['  return "{0}({1})".format(self.__class__.__name__, {0})'.format(repr_fmt, field_values)]
+
+            # Create code that will produce the correct format string
+            # The double braces {{ and }} escape to single braces { and } in format strings
+            body = ['  return "{0}({1})".format(self.__class__.__name__, {0})'.format(
+                repr_fmt.replace('{', '{{').replace('}', '}}'),
+                field_values
+            )]
             decorator = "@__dataclasses_recursive_repr()"
         else:
             body = ['  return self.__class__.__name__ + "()"']
