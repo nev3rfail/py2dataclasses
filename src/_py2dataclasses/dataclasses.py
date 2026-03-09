@@ -544,7 +544,10 @@ class _FuncBuilder(object):
         # Now that we've generated the functions, assign them into cls.
         for name, fn in zip(self.names, fns):
             # Use __qualname__ if available (Python 3), otherwise use __name__
-            class_qualname = getattr(cls, '__qualname__', qualname(cls))
+            if six.PY2:
+                class_qualname = getattr(cls, '__qualname__', qualname(cls))
+            else:
+                class_qualname = cls.__qualname__
             fn.__qualname__ = '{0}.{1}'.format(class_qualname, fn.__name__)
 
             # Apply method annotations if they were stored
@@ -1124,7 +1127,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             field_refs = ', '.join(['self.{0}'.format(f.name) for f in flds])
 
             # Build the code directly - construct the string without nested format() calls
-            body_line = '  return "{cls}({fields})".format(self.__qualname__, {field_refs})'.format(
+            body_line = '  return "{cls}({fields})".format(self.__class__.__qualname__, {field_refs})'.format(
                 cls='{0}',
                 fields=repr_fmt,
                 field_refs=field_refs
@@ -1132,7 +1135,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             body = [body_line]
             decorator = "@__dataclasses_recursive_repr()"
         else:
-            body = ['  return self.__qualname__ + "()"']
+            body = ['  return self.__class__.__qualname__ + "()"'.format(cls='{0}')]
             decorator = None
 
         attach_debug_function(cls, *func_builder.add_fn('__repr__',
@@ -1199,7 +1202,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
-    cls.__qualname__ = Qualname(cls)
+    if six.PY2:
+        cls.__qualname__ = Qualname(cls)
 
     # Create a class doc-string.
     doc_attr = getattr(cls, '__doc__')
@@ -1385,7 +1389,10 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
         cls_dict.pop(field_name, None)
 
     # And finally create the class.
-    qual_name = getattr(cls, '__qualname__', qualname(cls))
+    if six.PY2:
+        qual_name = getattr(cls, '__qualname__', qualname(cls))
+    else:
+        qual_name = cls.__qualname__
     # Use types.new_class() for Generic classes to support MRO entry resolution
     bases = cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__
     if typing.Generic in cls.__bases__ or any(hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
@@ -1396,8 +1403,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     else:
         newcls = type(cls)(cls.__name__, bases, cls_dict)
 
-    if qual_name is not None and not getattr(newcls, "__qualname__", None):
-            newcls.__qualname__ = qual_name
+    if qual_name is not None: # and getattr(newcls, "__qualname__", None):
+        newcls.__qualname__ = qual_name
 
     # gh-135228: Copy __firstlineno__ so GC-based class identity checks work.
     if hasattr(cls, '__firstlineno__'):
@@ -1412,7 +1419,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
 
     # Fix up any closures which reference __class__.
     # Check both the new class dict and the old class dict for methods that need updating
-    for member in list(newcls.__dict__.values()) + list(cls.__dict__.values()):
+    tmp = cls.__dict__.values()
+    for member in list(newcls.__dict__.values()) + list(tmp):
         # If this is a wrapped function, unwrap it.
         member = inspect.unwrap(member) if hasattr(inspect, 'unwrap') else member
 
@@ -1443,7 +1451,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     if init_annotate is not None:
         if getattr(init_annotate, '__generated_by_dataclasses__', False):
             _update_func_cell_for__class__(init_annotate, cls, newcls)
-
+    #del tmp
+    #del cls
     return newcls
 
 def _has_annotations(cls):
