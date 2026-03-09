@@ -34,3 +34,8 @@ still need to work, systems using python 2 still have to be supported and extend
 ## Testing
 
 - All tests are broken drafts for now
+
+## Definition of done
+- [ ] Py2 dict contains key in random order; 
+  >We have to fix it (OrderedDict?)
+- [ ] All tests run successfully with almost-to-none changes to test machinery itself (otherwise tests are useless);
