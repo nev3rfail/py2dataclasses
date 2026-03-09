@@ -27,9 +27,9 @@ jobs:
           - python-version: "3.14"
             os: ubuntu-latest
             container: python:3.14
-          - python-version: "3.x"
-            os: ubuntu-latest
-            container: python:latest
+#          - python-version: "3.x"
+#            os: ubuntu-latest
+#            container: python:latest
 
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
