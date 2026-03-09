@@ -24,14 +24,14 @@ from collections import OrderedDict
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.append(path)
-from dataclasses import fields, field, _Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses
 
 try:
-    from dataclasses import _oneshot
+    from dataclasses import _Field
 except:
-    from dataclasses import _Field as _oneshot
+    from dataclasses import Field as _Field
 
 try:
     import unittest2 as unittest
@@ -46,7 +46,7 @@ import weakref
 try:
     import types.GenericAlias as GenericAlias
 except ImportError:
-    from _py2dataclasses import type_utils as __type_utils, _oneshot
+    from _py2dataclasses import type_utils as __type_utils
 
     #import __abc_utils.ABC as ABC
     GenericAlias = __type_utils.GenericAlias
