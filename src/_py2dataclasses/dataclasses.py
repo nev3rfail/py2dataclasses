@@ -1116,7 +1116,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             # Build the field format string: x={0!r}, y={1!r}, z={2!r}
             field_formats = []
             for i, f in enumerate(flds):
-                field_formats.append('{0}={{{1}!r}}'.format(f.name, i))
+                field_formats.append('{0}={{{1}!r}}'.format(f.name, i + 1))  # offset by 1
             repr_fmt = ', '.join(field_formats)
 
             # Build the self.field references
