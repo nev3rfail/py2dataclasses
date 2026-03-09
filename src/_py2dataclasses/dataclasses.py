@@ -49,8 +49,13 @@ if _annotationlib is not None:
                 return _annotationlib.evaluate_forward_ref(
                     ann, globals=globals_dict, locals=globals_dict)
             elif hasattr(typing, 'evaluate_forward_ref'):
-                return typing.evaluate_forward_ref(
-                    ann, globalns=globals_dict, localns=globals_dict)
+                # Try both parameter styles for compatibility
+                try:
+                    return typing.evaluate_forward_ref(
+                        ann, globals=globals_dict, locals=globals_dict)
+                except TypeError:
+                    return typing.evaluate_forward_ref(
+                        ann, globalns=globals_dict, localns=globals_dict)
             else:
                 # Deprecated path - pass type_params to suppress DeprecationWarning
                 try:
@@ -81,32 +86,9 @@ if _annotationlib is not None:
         def __annotate__(format):
             Format = _annotationlib.Format
             if format in (Format.VALUE, Format.FORWARDREF, Format.STRING):
-                # Re-fetch class annotations DYNAMICALLY from the live __annotate__
-                # so that if __class__.__annotate__ is replaced after class creation,
-                # we reflect the new state (fixes test_incomplete_annotations / gh-142214).
-                cls_annotations = {}
-                try:
-                    live_annotate = __class__.__annotate__
-                    if getattr(live_annotate, '__generated_by_dataclasses__', False):
-                        # Our own annotate: use FORWARDREF to avoid infinite recursion
-                        cls_annotations = live_annotate(Format.FORWARDREF)
-                    else:
-                        # User-replaced annotate: call with FORWARDREF (never raises NameError)
-                        try:
-                            cls_annotations = live_annotate(Format.FORWARDREF)
-                        except Exception:
-                            cls_annotations = {}
-                except Exception:
-                    # Fall back: scan MRO __dict__ directly
-                    for base in reversed(__class__.__mro__):
-                        try:
-                            base_dict = object.__getattribute__(base, '__dict__')
-                            if '__annotations__' in base_dict:
-                                base_annotations = base_dict['__annotations__']
-                                if base_annotations:
-                                    cls_annotations.update(base_annotations)
-                        except AttributeError:
-                            pass
+                # Use the field_annotations captured in the closure instead of trying to fetch
+                # them from the class at runtime, which can cause issues with special descriptors
+                cls_annotations = field_annotations if field_annotations is not None else {}
 
                 new_annotations = OrderedDict()
 
@@ -1426,6 +1408,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             annotation_field_names = [f.name for f in fields.values()]
             cls.__annotate__ = _make_annotate_function(
                 cls, '__annotate__', annotation_field_names, MISSING)
+            # DEBUG
+            #import sys
+            #print(f"DEBUG: Set cls.__annotate__ for {cls.__name__}", file=sys.stderr)
+            #print(f"DEBUG: __generated_by_dataclasses__ = {getattr(cls.__annotate__, '__generated_by_dataclasses__', 'NOT FOUND')}", file=sys.stderr)
 
     return cls
 
