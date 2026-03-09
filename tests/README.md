@@ -9,16 +9,18 @@
 - test_analyzer.py -- lib to compare py314 tests to py27 tests. Ideally, they should be identical.
 
 # Instructions
--1. You are using powershell as an interpreter. You have two pythons here:
+- You are using powershell as an interpreter. You have two pythons here:
    - venv-py27\Scripts\python.exe for py2
-   - venv-py3\Scripts\python.exe for py3
-0. To analyze the python source, use the AST, not regexp.
-1. Do NOT create markdown files with descriptions of what you've done.
-2. After each step, append the description of your step to THIS file. This is your bible.
-3. Our task is to port tests from python 314 to python 2.7:
+   - venv-py3\Scripts\python.exe for py3 
+- To analyze the python source, use the AST, not regexp.
+- Do NOT create markdown files with descriptions of what you've done. 
+- After each step, append the description of your step to THIS file. This is your bible.
+- Our task is to port tests from python 314 to python 2.7:
    - We have `dataclasses` module that is compatible with the mainline dataclasses module. We have shims for typing. We have shims for annotationlib. No test is unportable, if you don't know how exactly port test from py 3.14 to py 2.7 then just port it line by line, replacing f-strings with py2-compat strings and replace py3 type annotations with `field`-ones.
    - You need to make sure that tests ported to py2.7 represent ones from py314. Compare each test function by function, line by line.
    - If something is missing, write the missing 2.7 test. Do not edit 314 tests, they are immutable.
+   - Build an AST tree of all tests for py3, then compare it to the tree of py2. 
+   - Go test-by-test in py3 and compare the py2 implementation. If something is missing, implement it. Remember, no skipping tests or omitting implementation becase "py2 does not support it". Because in our case it does.
 
 
 
