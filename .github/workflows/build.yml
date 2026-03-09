@@ -19,7 +19,10 @@ jobs:
         include:
           - python-version: "2.7"
             os: ubuntu-latest
-            container: coatldev/six:latest
+            container:
+              image: coatldev/six:latest
+              env:
+                UV_PYTHON: '3.14'
           - python-version: "3.14"
             os: ubuntu-latest
             container: python:3.14.3
@@ -33,10 +36,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+#      - name: Setup Python
+#        uses: actions/setup-python@v5
+#        with:
+#          python-version: ${{ matrix.python-version }}
 
       - name: Install build tools
         run: |
