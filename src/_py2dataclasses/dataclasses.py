@@ -708,7 +708,8 @@ def _init_fn(fields, std_fields, kw_only_fields, frozen, has_post_init,
 
 def _frozen_get_del_attr(cls, fields, func_builder):
     locals = {'cls': cls,
-              'FrozenInstanceError': FrozenInstanceError}
+              'FrozenInstanceError': FrozenInstanceError,
+              '__dataclass_self__': cls}  # Add the class to locals for super()
     condition = 'type(self) is cls'
     if fields:
         condition += ' or name in {' + ', '.join(repr(f.name) for f in fields) + '}'
@@ -717,14 +718,14 @@ def _frozen_get_del_attr(cls, fields, func_builder):
                         ('self', 'name', 'value'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot assign to field {0!r}".format(name))',
-                         '  super({0}, self).__setattr__(name, value)'.format(cls.__name__)),
+                         '  super(__dataclass_self__, self).__setattr__(name, value)'),
                         locals=locals,
                         overwrite_error=True))
     attach_debug_function(cls, *func_builder.add_fn('__delattr__',
                         ('self', 'name'),
                         ('  if {0}:'.format(condition),
                          '   raise FrozenInstanceError("cannot delete field {0!r}".format(name))',
-                         '  super({0}, self).__delattr__(name)'.format(cls.__name__)),
+                         '  super(__dataclass_self__, self).__delattr__(name)'),
                         locals=locals,
                         overwrite_error=True))
 
@@ -1128,21 +1129,6 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
-    else:
-        # Mimic python 3's type errors while comparing different types
-        #flds = [f for f in field_list if f.compare]
-        #self_tuple = _tuple_str('self', flds)
-        #other_tuple = _tuple_str('other', flds)
-        for name, op in [('__lt__', '<'),
-                         ('__le__', '<='),
-                         ('__gt__', '>'),
-                         ('__ge__', '>=')]:
-            attach_debug_function(cls, *func_builder.add_fn(name,
-                                ('self', 'other'),
-                                ['  if other.__class__ is self.__class__:',
-                                 '   raise TypeError("not supported between instances of \'{}\' and \'{}\'".format(other.__class__.__name__, self.__class__.__name__))',
-                                 '  raise TypeError("not supported between instances of \'{}\' and \'{}\'".format(other.__class__.__name__, self.__class__.__name__))'],
-                               ))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -1158,19 +1144,53 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
     cls.__qualname__ = qualname(cls)
+
+    # Create a class doc-string.
     doc_attr = getattr(cls, '__doc__')
     if doc_attr is None:
-        doc_string = ""
-    else:
-        doc_string = cls.__doc__
-    # Create a class doc-string.
-    try:
-        text_sig = str(", ".join("{}: {!s}".format(k, t.__name__) for k, t in cls.__annotations__.items())).replace(' -> None', '')
-    except (TypeError, ValueError, AttributeError):
-        text_sig = ''
-    doc_string = cls.__name__ + text_sig + doc_string
-    if doc_attr is not None:
-        cls.__doc__ = doc_string
+        # Generate signature-style docstring
+        sig_fields = []
+        for f in std_init_fields:
+            # Format the field type
+            if f.type is not None and f.type is not MISSING:
+                try:
+                    # Get the string representation of the type
+                    if hasattr(f.type, '__module__') and hasattr(f.type, '__qualname__'):
+                        if f.type.__module__ in ('builtins', '__builtin__'):
+                            type_str = f.type.__qualname__
+                        else:
+                            type_str = f.type.__module__ + '.' + f.type.__qualname__
+                    elif hasattr(f.type, '__name__'):
+                        type_str = f.type.__name__
+                    else:
+                        type_str = str(f.type)
+                        # Clean up typing annotations
+                        type_str = type_str.replace('typing.', '')
+                        type_str = type_str.replace('Union[', '')
+                        type_str = type_str.replace(', NoneType]', '|None')
+                        type_str = type_str.replace(', type(None)]', '|None')
+                        if type_str.endswith(']') and '|None' in type_str:
+                            type_str = type_str.replace(', None]', '|None')
+                except (AttributeError, TypeError):
+                    type_str = 'typing.Any'
+            else:
+                type_str = 'typing.Any'
+
+            # Format field with or without default
+            if f.default is not MISSING:
+                if f.default is None:
+                    default_str = 'None'
+                elif isinstance(f.default, str):
+                    default_str = repr(f.default)
+                else:
+                    default_str = str(f.default)
+                sig_fields.append('{}:{}={}'.format(f.name, type_str, default_str))
+            elif f.default_factory is not MISSING:
+                sig_fields.append('{}:{}=<factory>'.format(f.name, type_str))
+            else:
+                sig_fields.append('{}:{}'.format(f.name, type_str))
+
+        cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
 
     if match_args:
         _set_new_attribute(cls, '__match_args__',
@@ -1308,7 +1328,15 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
 
     # And finally create the class.
     qualname = getattr(cls, '__qualname__', getattr(cls, '__name__', None))
-    newcls = type(cls)(cls.__name__, cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__, cls_dict)
+    # Use types.new_class() for Generic classes to support MRO entry resolution
+    bases = cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__
+    if typing.Generic in cls.__bases__ or any(hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
+        # Use types.new_class() for classes with __mro_entries__ (like Generic)
+        def exec_body(ns):
+            ns.update(cls_dict)
+        newcls = types.new_class(cls.__name__, bases, exec_body=exec_body)
+    else:
+        newcls = type(cls)(cls.__name__, bases, cls_dict)
 
     if qualname is not None and getattr(newcls, "__qualname__", None):
             newcls.__qualname__ = qualname
