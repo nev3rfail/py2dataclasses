@@ -136,6 +136,15 @@ def _get_type_str(f_type):
         return 'typing.Any'
 
     try:
+        # Handle ForwardRef - extract the string representation
+        import annotationlib
+        if isinstance(f_type, annotationlib.ForwardRef):
+            # Return just the arg name without the ForwardRef repr
+            return f_type.__forward_arg__
+    except (ImportError, AttributeError):
+        pass
+
+    try:
         # First, get the string representation
         type_str = None
 
