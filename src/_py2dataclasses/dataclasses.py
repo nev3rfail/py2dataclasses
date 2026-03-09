@@ -751,21 +751,34 @@ def _is_type(annotation, cls, a_module, a_type, is_type_predicate):
         module_name = match.group(1)
         if not module_name:
             # No module name, assume the class's module did
-            # "from dataclasses import InitVar".
+            # "from dataclasses import InitVar" or "from dataclasses import KW_ONLY".
             _ns = sys.modules.get(cls.__module__, None)
-            if _ns is None:
-                pass
-            ns = _ns.__dict__
+            if _ns is not None:
+                ns = _ns.__dict__
         else:
             # Look up module_name in the class's module.
             module = sys.modules.get(cls.__module__)
-            m1 = module.__dict__.get(module_name)
-            if m1:
-                m2 = m1.__dict__.get(module_name)
-            else:
-                m2 = None
-            if module and (m1 is a_module or m2 is a_module):
-                ns = sys.modules.get(a_type.__module__).__dict__
+            if module is not None:
+                m1 = module.__dict__.get(module_name)
+                if m1 is a_module:
+                    # The module_name directly refers to the correct module
+                    ns = a_module.__dict__
+
+            # If not found in the current module, try looking it up directly in sys.modules
+            if ns is None:
+                # Try the module_name directly
+                if module_name in sys.modules:
+                    potential_module = sys.modules[module_name]
+                    if potential_module is a_module:
+                        ns = a_module.__dict__
+
+                # Also try the full module path (for backported versions)
+                if ns is None and a_module.__name__ and '.' in a_module.__name__:
+                    # a_module might be '_py2dataclasses.dataclasses'
+                    # Check if 'dataclasses' in the annotation refers to this module
+                    if module_name == 'dataclasses' and a_module.__name__.endswith('.dataclasses'):
+                        ns = a_module.__dict__
+
         if ns and is_type_predicate(ns.get(match.group(2)), a_module):
             return True
     return False
@@ -1193,10 +1206,21 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # It's an error to specify weakref_slot if slots is False.
     if weakref_slot and not slots:
         raise TypeError('weakref_slot is True but slots is False')
+    # ...existing code...
     if slots:
         cls = _add_slots(cls, frozen, weakref_slot, fields)
     #abc.abstractmethod()
     update_abstractmethods(cls)
+
+    # Add __annotate__ method for PEP 649 compatibility (Python 3.14+)
+    if _annotationlib is not None:
+        # Only add if not already present (allow custom implementations)
+        if not hasattr(cls, '__annotate__') or getattr(cls, '__annotate__', None) is None:
+            # Build list of field names for annotation
+            annotation_field_names = [f.name for f in fields.values()]
+            cls.__annotate__ = _make_annotate_function(
+                cls, '__annotate__', annotation_field_names, MISSING)
+
     return cls
 
 
