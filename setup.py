@@ -9,7 +9,7 @@ with io.open('README.md', encoding='utf-8') as f:
 
 setup(
     name='py2dataclasses',
-    version='3.14.10',
+    version='3.14.11',
     description='PEP-557 compatible dataclasses backport for Python 2.7+',
     long_description=long_description,
     long_description_content_type='text/markdown',
