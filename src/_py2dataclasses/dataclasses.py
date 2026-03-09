@@ -18,6 +18,7 @@ from .type_utils import make_alias, _get_type_str, MISSING
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
+builtin_repr = repr
 from .class_utils import is_descriptor, qualname
 if six.PY2:
     from dictproxyhack import dictproxy as _dict_proxy
@@ -1170,6 +1171,21 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
+    elif six.PY2:
+        # In Python 2, we need to explicitly prevent comparisons when order=False
+        # In Python 3, this is automatic, but in Py2 objects can be compared by default
+        for name, op in [('__lt__', '<'),
+                         ('__le__', '<='),
+                         ('__gt__', '>'),
+                         ('__ge__', '>=')]:
+            error_msg = "'{0}' not supported between instances of '{{0}}' and '{{0}}'".format(op)
+            body = [
+                '  raise TypeError({0}.format(self.__class__.__name__))'.format(builtin_repr(error_msg))
+            ]
+            attach_debug_function(cls, *func_builder.add_fn(name,
+                                ('self', 'other'),
+                                body,
+                                overwrite_error=None))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -1208,6 +1224,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             else:
                 sig_fields.append('{}:{}'.format(f.name, type_str))
 
+        # in python 2 `cls.__doc__ = "smth"` causes an exception, so we update doc only if it were already there.
         if six.PY3 or doc_attr is not None:
             if sig_fields:
                 cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
