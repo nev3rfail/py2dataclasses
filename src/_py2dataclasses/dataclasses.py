@@ -544,7 +544,7 @@ class _FuncBuilder(object):
         # Now that we've generated the functions, assign them into cls.
         for name, fn in zip(self.names, fns):
             # Use __qualname__ if available (Python 3), otherwise use __name__
-            class_qualname = getattr(cls, '__qualname__', cls.__name__)
+            class_qualname = getattr(cls, '__qualname__', qualname(cls))
             fn.__qualname__ = '{0}.{1}'.format(class_qualname, fn.__name__)
 
             # Apply method annotations if they were stored
@@ -1199,7 +1199,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Generate the methods and add them to the class.
     func_builder.add_fns_to_class(cls)
-    cls.__qualname__ = qualname(cls)
+    cls.__qualname__ = Qualname(cls)
 
     # Create a class doc-string.
     doc_attr = getattr(cls, '__doc__')
@@ -1345,6 +1345,12 @@ def _create_slots(defined_fields, inherited_slots, field_names, weakref_slot):
         return slots
     return tuple(slots.keys())
 
+class Qualname(object):
+    def __init__(self, cls):
+        self.qualname = qualname(cls)
+    def __get__(self, instance, owner):
+        return self.qualname if instance else owner.qualname
+
 
 def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     # Need to create a new class, since we can't set __slots__ after a
@@ -1379,7 +1385,7 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
         cls_dict.pop(field_name, None)
 
     # And finally create the class.
-    qualname = getattr(cls, '__qualname__', getattr(cls, '__name__', None))
+    qual_name = getattr(cls, '__qualname__', qualname(cls))
     # Use types.new_class() for Generic classes to support MRO entry resolution
     bases = cls.__orig_bases__ if typing.Generic in cls.__bases__ else cls.__bases__
     if typing.Generic in cls.__bases__ or any(hasattr(b, '__mro_entries__') for b in getattr(cls, '__orig_bases__', ())):
@@ -1390,8 +1396,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
     else:
         newcls = type(cls)(cls.__name__, bases, cls_dict)
 
-    if qualname is not None and getattr(newcls, "__qualname__", None):
-            newcls.__qualname__ = qualname
+    if qual_name is not None and not getattr(newcls, "__qualname__", None):
+            newcls.__qualname__ = qual_name
 
     # gh-135228: Copy __firstlineno__ so GC-based class identity checks work.
     if hasattr(cls, '__firstlineno__'):

@@ -2,6 +2,10 @@
 from __future__ import print_function, absolute_import
 import os
 import sys
+import textwrap
+
+import six
+
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.insert(0, path)
 
@@ -787,7 +791,7 @@ class TestCase(unittest.TestCase):
         @dataclass
         class C(object):
             x = field(list, default_factory=list, repr=False)
-        self.assertEqual(repr(C()), 'TestCase.test_default_factory.<locals>.C()')
+        self.assertEqual(repr(C()), two_or_three("tests._fixtures_py27.C()",'TestCase.test_default_factory.<locals>.C()'))
         self.assertEqual(C().x, [])
 
         # hash
@@ -1147,8 +1151,7 @@ class TestCase(unittest.TestCase):
             with self.subTest(idx=idx):
                 with self.assertRaisesRegexp(TypeError,
                                              r"not supported between instances of 'B' and 'C'"):
-                    pew, pew1 = B(0), C(0),
-                    fn(pew, pew1)
+                    fn(B(0), C(0))
     #@unittest.skip("We have __lt__ and __gt__ everywhere to trigger a proper exception")
     def test_eq_order(self):
         # Test combining eq and order.
@@ -1645,7 +1648,7 @@ class TestCase(unittest.TestCase):
             qualname = getattr(A, function).__qualname__
             self.assertIn('A', qualname, "Function {} qualname should contain 'A': {}".format(function, qualname))
 
-        with self.assertRaisesRegexp(TypeError, r"A\.__init__\(\) missing"):
+        with self.assertRaisesRegexp(TypeError, two_or_three(r"__init__\(\) takes", r"A\.__init__\(\) missing")):
             A()
 
     def test_class_var(self):
@@ -3054,6 +3057,7 @@ class TestInitAnnotate(unittest.TestCase):
 
 class TestRepr(unittest.TestCase):
     def test_repr(self):
+        print("aaa")
         @dataclass
         class B(object):
             x = field(int)
@@ -3063,19 +3067,23 @@ class TestRepr(unittest.TestCase):
             y = field(int, default=10)
 
         o = C(4)
-        # Basic repr test - just verify it contains the values
-        repr_str = repr(o)
-        self.assertIn('C', repr_str)
-        self.assertIn('4', repr_str)
-        self.assertIn('10', repr_str)
+        self.assertEqual(repr(o), two_or_three("tests._fixtures_py27.C(x=4, y=10)", 'TestRepr.test_repr.<locals>.C(x=4, y=10)'))
 
         @dataclass
         class D(C):
-            x = field(int, default=20)
-        repr_str = repr(D())
-        self.assertIn('D', repr_str)
-        self.assertIn('20', repr_str)
-        self.assertIn('10', repr_str)
+            x = field(int, default = 20)
+        self.assertEqual(repr(D()), two_or_three("tests._fixtures_py27.D(x=20, y=10)", 'TestRepr.test_repr.<locals>.D(x=20, y=10)'))
+
+        @dataclass
+        class C(object):
+            @dataclass
+            class D(object):
+                i = field(int)
+            @dataclass
+            class E(object):
+                pass
+        self.assertEqual(repr(C.D(0)), two_or_three("tests._fixtures_py27.D(i=0)", 'TestRepr.test_repr.<locals>.C.D(i=0)'))
+        self.assertEqual(repr(C.E()), two_or_three("tests._fixtures_py27.E()",'TestRepr.test_repr.<locals>.C.E()'))
 
     def test_no_repr(self):
         # Test a class with no __repr__ and repr=False.
@@ -3974,7 +3982,8 @@ def expose_to_test(*classes):
                 setattr(mod, name, orig)
 
 
-
+def two_or_three(two, three):
+    return two if six.PY2 else three
 
 
 
@@ -4702,7 +4711,7 @@ class TestStringAnnotations(unittest.TestCase):
 
         # Skip this test as it requires get_type_hints functionality
         # that may not be fully compatible in Python 2.7
-        raise #pass
+        raise Exception("Skip this test as it requires get_type_hints functionality")
 
 class TestFrozen(unittest.TestCase):
     def test_inherit_frozen_mutliple_inheritance(self):
