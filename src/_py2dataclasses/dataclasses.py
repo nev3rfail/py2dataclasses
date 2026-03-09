@@ -1328,6 +1328,35 @@ def _update_func_cell_for__class__(f, oldcls, newcls):
     return False
 
 
+def _clear_forwardref_owners(obj, oldcls):
+    """Recursively clear ForwardRef owners to break circular references.
+
+    This is needed to allow the original class to be garbage collected
+    when slots=True (gh-135228).
+    """
+    if _annotationlib is None:
+        return
+
+    # Handle ForwardRef objects
+    if isinstance(obj, _annotationlib.ForwardRef):
+        # Clear the owner if it points to the old class
+        if getattr(obj, '__owner__', None) is oldcls:
+            try:
+                object.__setattr__(obj, '__owner__', None)
+            except (AttributeError, TypeError):
+                pass
+        return
+
+    # Handle generic types with __args__
+    if hasattr(obj, '__args__'):
+        for arg in obj.__args__:
+            _clear_forwardref_owners(arg, oldcls)
+
+    # Handle Union and similar types
+    if hasattr(obj, '__origin__'):
+        _clear_forwardref_owners(obj.__origin__, oldcls)
+
+
 def _create_slots(defined_fields, inherited_slots, field_names, weakref_slot):
     # The slots for our class.
     seen_docs = False
@@ -1444,6 +1473,8 @@ def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
                 pass
             else:
                 f.type = ann
+                # Clear ForwardRef owners that reference the old class (gh-135228)
+                _clear_forwardref_owners(ann, cls)
 
     # Fix the class reference in the __annotate__ method
     init = newcls.__init__
