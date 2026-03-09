@@ -19,13 +19,16 @@ jobs:
         include:
           - python-version: "2.7"
             os: ubuntu-20.04
+            container: python:2.7.18-buster
           - python-version: "3.14"
             os: ubuntu-latest
+            container: python:3.14.3-slim
           - python-version: "3.x"
             os: ubuntu-latest
+            container: python:3.14.3-slim
 
     runs-on: ${{ matrix.os }}
-
+    container: ${{ matrix.container }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
