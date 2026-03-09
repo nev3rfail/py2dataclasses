@@ -18,14 +18,14 @@ jobs:
       matrix:
         include:
           - python-version: "2.7"
-            os: linux
-            container: python:2.7.18-buster
+            os: ubuntu-latest
+            container: coatldev/six:latest
           - python-version: "3.14"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:3.14.3
           - python-version: "3.x"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:latest
 
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}

@@ -12,8 +12,8 @@ jobs:
       matrix:
         include:
           - python-version: "2.7"
-            os: linux
-            container: python:2.7.18-buster
+            os: ubuntu-latest
+            container: coatldev/six:latest
             tox-env: "test_ported_on_portedlib_py27"
           - python-version: "3.14"
             os: ubuntu-latest
