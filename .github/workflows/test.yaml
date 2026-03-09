@@ -45,4 +45,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ${{ matrix.tox-env }}.xml
+          name: ${{ matrix.tox-env }}
           slug: nev3rfail/py2dataclasses
