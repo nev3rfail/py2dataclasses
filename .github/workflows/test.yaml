@@ -17,19 +17,19 @@ jobs:
             tox-env: "test_ported_on_portedlib_py27"
           - python-version: "3.14"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:3.14.3
             tox-env: "test_native_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:3.14.3
             tox-env: "test_ported_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:3.14.3
             tox-env: "test_ported_on_nativelib"
           - python-version: "3.14"
             os: ubuntu-latest
-            container: python:3.14.3-slim
+            container: python:3.14.3
             tox-env: "test_native_on_nativelib"
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
