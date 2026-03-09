@@ -129,8 +129,10 @@ dmypy.json
 .pyre/
 **__pycache__
 
-# PyCharm
+# PyCharm / IntelliJ
 .idea/
+*.iml
+.run/
 
 # RStudio project files
 **.Rproj.user/

@@ -1,0 +1,30 @@
+- This directory is a test dir for the backport of Python 3 dataclasses to python 2.7.
+> The backport of tests is "human-driven AI port" meaning tests were translated from py3 to py2 by neural networks, and then were fixed by human.
+- _fixtures_py314 dir contains original python 3.14 tests for the `dataclasses` lib. Test themselves are in `__init__.py`
+- _fixtures_py27 dir contains tests ported from python 3.14 to python 2.7 as closely as possible (WIP).  Test themselves are in `__init__.py` 
+- test_native_on_nativelib.py -- runs native python 3.14 tests on stdlib `dataclasses` (run with py3)
+- test_native_on_portedlib.py -- runs native python 3.14 tests on backported `dataclasses` (py2dataclasses) (run with py3)
+- test_ported_on_nativelib.py -- runs ported to py2.7 tests on stdlib `dataclasses` (run with py3)
+- test_ported_on_portedlib.py -- runs ported to py2.7 tests on backported `dataclasses` (run with py27)
+- test_analyzer.py -- lib to compare py314 tests to py27 tests. Ideally, they should be identical.
+
+# Instructions
+- You are using powershell as an interpreter. You have two pythons here:
+   - venv-py27\Scripts\python.exe for py2
+   - venv-py3\Scripts\python.exe for py3 
+- To analyze the python source, use the AST, not regexp.
+- Do NOT create markdown files with descriptions of what you've done. 
+- After each step, append the description of your step to THIS file. This is your bible.
+- Our task is to port tests from python 314 to python 2.7:
+   - We have `dataclasses` module that is compatible with the mainline dataclasses module. We have shims for typing. We have shims for annotationlib. No test is unportable, if you don't know how exactly port test from py 3.14 to py 2.7 then just port it line by line, replacing f-strings with py2-compat strings and replace py3 type annotations with `field`-ones.
+   - You need to make sure that tests ported to py2.7 represent ones from py314. Compare each test function by function, line by line.
+   - If something is missing, write the missing 2.7 test. Do not edit 314 tests, they are immutable.
+   - Build an AST tree of all tests for py3, then compare it to the tree of py2. 
+   - Go test-by-test in py3 and compare the py2 implementation. If something is missing, implement it. Remember, no skipping tests or omitting implementation becase "py2 does not support it". Because in our case it does.
+
+
+
+# The agent log goes here:
+- Step 1: Added exception handling for Python 2/3 compatibility in `fields()` function to properly set `__suppress_context__` only on Python 3.3+
+- Step 2: Ensured all exception messages are consistent between Py2 and Py3 versions
+- Step 3: FrozenInstanceError properly inherits from AttributeError in both versions

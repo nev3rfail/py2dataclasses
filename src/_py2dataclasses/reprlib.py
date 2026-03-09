@@ -5,7 +5,10 @@ __all__ = ["Repr", "repr", "recursive_repr"]
 _orig_repr = repr
 g_MAX_DIGITS = 4300
 from itertools import islice
-from thread import get_ident
+try:
+    from thread import get_ident
+except:
+    from _thread import get_ident
 
 def recursive_repr(fillvalue='...'):
     'Decorator to make a repr function return fillvalue for a recursive call'

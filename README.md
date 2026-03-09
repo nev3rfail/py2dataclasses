@@ -1,6 +1,6 @@
 # py2dataclasses
 
-This repo is a somewhat PEP-557 compatible dataclass implementation for Python 2.7.
+This repo is a PEP-557 compatible dataclass implementation for Python 2.7.
 
 ***
 
@@ -12,30 +12,32 @@ still need to work, systems using python 2 still have to be supported and extend
 
 ## ⚠ WARNING
 
-* DO NOT use python 2.7 in 2026
-* Really, DO NOT use py2 in 2026
-* [Please, read Python 3 migration statement](https://python3statement.github.io/)
+* Please, DO NOT use Python 2.7 in 2026
 
-## Safety
+## Usage
 
-> ⚠ Hazmat
+On Python 2.7 there is no annotation syntax (`x: int`), so fields are declared using `field()` descriptors:
 
-- Many things are missing
-- Even more things are present but working improperly
+```python
+from dataclasses import dataclass, field
 
+@dataclass
+class Point(object):
+    x = field(int)
+    y = field(int)
+
+p = Point(3, 4)
+print(p)        # Point(x=3, y=4)
+print(p.x)      # 3
+print(p == Point(3, 4))  # True
+```
 ## Development
 
 - This is quite a straightforward convertion of dataclasses into a py2 syntax/standard done initially by neural network,
   and after that it was reviewed, fixed and finished by human.
-- Tests are stolen from cpython 3.14 branch and converted (poorly) to py2
-- This is **not** production ready (yet)
-- Contributions are welcome ~~please help~~
+- Tests are taken from the cpython 3.14 branch and converted to py2
 
 ## Testing
 
-- All tests are broken drafts for now
-
-## Definition of done
-- [ ] Py2 dict contains key in random order; 
-  >We have to fix it (OrderedDict?)
-- [ ] All tests run successfully with almost-to-none changes to test machinery itself (otherwise tests are useless);
+- This project aims to pass all the tests from Python 3.14
+- It also aims to pass all backported tests.

@@ -1,8 +1,10 @@
 from abc import ABCMeta
 
+import six
 
-class ABC(object):
-    __metaclass__ = ABCMeta
+
+@six.add_metaclass(ABCMeta)
+class ABC(object): pass
 
 
 def update_abstractmethods(cls):

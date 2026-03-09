@@ -1,0 +1,157 @@
+#!/usr/bin/env python
+#import six
+#six.add_move(six.MovedAttribute("collections_abc", "collections", "collections.abc", "MutableMapping"))
+import json
+
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), ".."))
+
+try:
+    from collections import MutableMapping
+except:
+    # python 2 hack
+    import collections
+    from collections.abc import MutableMapping
+    object.__setattr__(collections, "MutableMapping", MutableMapping)
+
+
+
+def iter_tests(suite):
+    """Recursively yield individual test cases from a TestSuite."""
+    for item in suite:
+        if isinstance(item, (unittest.TestSuite,unittest2.TestSuite,)):
+            yield from iter_tests(item)
+        else:
+            yield item
+
+import unittest
+import unittest2
+from collections import defaultdict
+
+def analyze_tests(module_name):
+    loader = unittest.TestLoader()
+    root_suite = loader.loadTestsFromName(module_name)
+
+    seen = set()
+    by_class = defaultdict(list)
+    standalone = []
+
+    def walk(suite):
+        for item in suite:
+            if isinstance(item, (unittest.TestSuite, unittest2.TestSuite)):
+                walk(item)
+            else:
+                # item is a TestCase or FunctionTestCase
+                if isinstance(item, (unittest.FunctionTestCase, unittest2.FunctionTestCase)):
+                    standalone.append(item)
+                else:
+                    if isinstance(item, (unittest2.loader._FailedTest, unittest.loader._FailedTest)):
+                        item.debug()
+                    if item not in seen:
+                        seen.add(item)
+                        cls = item.__class__
+                        by_class[cls].append(item)
+
+    walk(root_suite)
+    return by_class, standalone
+
+def render_test_dir(tests_dict, deeper=False):
+    #by_class, standalone = analyze_tests(tests_dir) ## os.path.abspath(tests_dir)
+    total = 0
+
+    print("Test classes and their tests:\n")
+    for container, tests in tests_dict.items():
+        print(container)
+        for t in tests:
+            print(f"  - {t}")
+        print(f"  ({len(tests)} tests)\n")
+        total += len(tests)
+
+    print(f"Total number of tests: {total}")
+
+def render_test_diff(tests_dict, name_list):
+    #by_class, standalone = analyze_tests(tests_dir) ## os.path.abspath(tests_dir)
+    total = 0
+
+    print("Test classes and their tests:\n")
+    for container, tests in tests_dict.items():
+        if tests:
+            print()
+            print(container)
+        for t in tests:
+            if t:
+                print(f"  - {len(t)} {name_list[tests.index(t)]} {(", ".join(t))}")
+            else: pass
+            total += len(t)
+        #print(f"  ({len(tests)} tests)\n")
+        #total += len(tests)
+
+    print(f"Total number of tests: {total}")
+
+def diff_lists(list1, list2):
+    set1 = set(list1)
+    set2 = set(list2)
+    # (missing from first, missing from second)
+    return list(set2 - set1), list(set1 - set2)
+
+
+def diff_dicts(dict1, dict2, name_filter):
+    names1 = {name_filter(k): k for k in dict1}
+    names2 = {name_filter(k): k for k in dict2}
+
+    ret = {}
+
+    for name in set(names1) | set(names2):
+        k1 = names1.get(name)
+        k2 = names2.get(name)
+
+        v1 = dict1[k1] if k1 is not None else []
+        v2 = dict2[k2] if k2 is not None else []
+
+        ret[name] = diff_lists(v1, v2)
+
+    return ret
+
+def get_tests_data(module_name):
+    by_class, standalone = analyze_tests(module_name) ## os.path.abspath(tests_dir)
+    total = 0
+    ret = {}
+    #print("Test classes and their tests:\n")
+    for cls, tests in sorted(by_class.items(), key=lambda x: x[0].__name__):
+        _name = f"{cls.__module__}.{cls.__name__}"
+        _name = _prepare_module_name(_name)
+        if _name not in ret:
+            ret[_name] = []
+        _t = [t._testMethodName for t in tests]
+        ret[_name].extend(_t)
+        total +=len(_t)
+
+    if standalone:
+        if module_name not in ret:
+            ret[module_name] = []
+        for t in standalone:
+            ret[module_name].append(t)
+            total +=1
+    return total, ret
+
+_prepare_module_name = lambda x: x.replace("_py27", "").replace("_py314", "")
+
+if __name__ == "__main__":
+    path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    sys.path.insert(0, path)
+    total314, data314 = get_tests_data("_fixtures_py314")
+    oew = json.loads(json.dumps(data314))
+    sys.modules["unittest"] = sys.modules["unittest2"]
+
+    total, data = get_tests_data("_fixtures_py27")
+    # for k, item in data314.items():
+    #     print("\n",set(data[k] if k in data else "NO"),"\n",set(data314[k]))
+    # for k, item in data.items():
+    #     print("\n",set(data314[k]),"\n",set(data[k]))
+    f = diff_dicts(oew, data, lambda x: x.replace("_py27", "").replace("_py314", ""))
+    render_test_diff(f, ["extra", "missing"])
+    pass
+
+
