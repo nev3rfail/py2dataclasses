@@ -1884,7 +1884,7 @@ class TestCase(unittest.TestCase):
             x = field(int)
 
         class B(A):
-            y = 0
+            y = field(int)
 
         @dataclass
         class C(B):

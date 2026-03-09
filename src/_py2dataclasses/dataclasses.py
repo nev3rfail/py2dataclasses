@@ -413,7 +413,8 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     f.type = _typ
     return f
 
-
+def throw(e, m):
+    raise e(m)
 # WIP descriptor delegation
 class Field(_Field):
     def __get__(self, instance, owner):
@@ -429,7 +430,7 @@ class Field(_Field):
             elif self.name and hasattr(instance, self.name):
                 v = object.__getattribute__(self, self.name)
             else:
-                v= self.default if self.default is not MISSING else self.default_factory()
+                v= self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(AttributeError, "object has no attribute {}".format(self.name))
                 #         if self.default_factory is MISSING:
                 #v = self.default or self.default_factory()
         return v
@@ -809,7 +810,7 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # If the default value isn't derived from Field, then it's only a
     # normal default value.  Convert it to a Field().
     default = getattr(cls, a_name, MISSING)
-    if isinstance(default, _Field):
+    if isinstance(default, (_Field, Field)):
         f = default
     else:
         if isinstance(default, types.MemberDescriptorType):
@@ -922,7 +923,7 @@ def collect_annotations(cls):
     _existing_annotations = _get_annotations(cls)
     i = 0
     for name, value in cls.__dict__.items():
-        if isinstance(value, _Field):
+        if isinstance(value, (Field, _Field)):
             vt = value.type
             if vt is MISSING:
                 vt = _existing_annotations.get(name, vt) if _existing_annotations is not None else vt
@@ -1047,7 +1048,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     for f in cls_fields:
         fields[f.name] = f
 
-        if isinstance(getattr(cls, f.name, None), _Field):
+        if isinstance(getattr(cls, f.name, None), (Field, _Field)):
             if f.type is MISSING:
                 raise TypeError('{0!r} is a field but has no type annotation'.format(f.name))
             if f.default is MISSING:
@@ -1057,7 +1058,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Do we have any Field members that don't also have annotations?
     for name, value in cls.__dict__.items():
-        if ((isinstance(value, _Field) and value.type is None)) and not name in cls_annotations:
+        if ((isinstance(value, (_Field, Field)) and value.type is None)) and not name in cls_annotations:
             raise TypeError('{0!r} is a field but has no type annotation'.format(name))
 
     # Check rules that apply if we are derived from any dataclasses.
@@ -1236,6 +1237,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if not slots:
         # Check only direct parent bases, not grandparents
         for base in cls.__bases__:
+            for k,v in base.__dict__.items():
+                if isinstance(v, (Field, _Field)):
+                    if v.name is None:
+                        v.__set_name__(base, k)
             base_params = getattr(base, _PARAMS, None)
             if base_params is None and '__slots__' in base.__dict__:
                 # Direct base is not a dataclass but has slots, auto-create slots
