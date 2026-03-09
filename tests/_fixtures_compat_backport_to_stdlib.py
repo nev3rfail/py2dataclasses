@@ -3,7 +3,7 @@ import typing
 from collections import OrderedDict
 import unittest
 
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from dataclasses import fields, field, _Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses as _stdlib_dataclasses
 
@@ -23,7 +23,7 @@ def field_adapter(_typ=None, *args, **kwargs):
     if args:
         kwargs['default'] = args[0]
     kwargs.pop('mode', None)
-    if _typ is not None and not isinstance(_typ, Field):
+    if _typ is not None and not isinstance(_typ, _Field):
         if _is_type_annotation(_typ):
             f = field(**kwargs)
             f.type = _typ
@@ -46,7 +46,7 @@ def _adapter_is_classvar(tp):
 def collect_annotations(cls):
     items = OrderedDict()
     for name, value in cls.__dict__.items():
-        if isinstance(value, Field):
+        if isinstance(value, _Field):
             t = value.type
             if t is None:
                 raise TypeError(
@@ -80,7 +80,7 @@ def _dataclass_adapter(cls, *args, **kwargs):
             for name, tp in ann.items():
                 if _adapter_is_classvar(tp):
                     field_obj = cls.__dict__.get(name)
-                    if isinstance(field_obj, Field) and field_obj.default is not MISSING:
+                    if isinstance(field_obj, _Field) and field_obj.default is not MISSING:
                         type.__setattr__(cls, name, field_obj.default)
     return dataclass(cls, *args, **kwargs)
 
@@ -112,7 +112,7 @@ def patch_module(mod):
     object.__setattr__(mod, "dataclasses", _stdlib_dataclasses)
 
 
-    object.__setattr__(mod, "_oneshot", Field)
+    object.__setattr__(mod, "_oneshot", _Field)
 
 def patch_sys():
     _stdlib_dataclasses.field = field_adapter

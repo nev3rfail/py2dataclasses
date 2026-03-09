@@ -3,6 +3,12 @@ import sys
 import six
 import typing
 
+# A sentinel object to detect if a parameter is supplied or not.  Use
+# a class to give it a better repr.
+class _MISSING_TYPE(object):
+    pass
+
+MISSING = _MISSING_TYPE()
 
 class _GenericMeta(abc.ABCMeta):
     def __getitem__(cls, typ):
@@ -119,4 +125,57 @@ def _resolve_type(tp, type_vars):
             except TypeError:
                 return tp
     return tp
+
+
+def _get_type_str(f_type):
+    """Get a string representation of a type for docstrings."""
+    if f_type is None or f_type is MISSING:
+        return 'typing.Any'
+
+    try:
+        # Handle typing generics with subscripts
+        if hasattr(f_type, '__origin__'):
+            origin = f_type.__origin__
+            if hasattr(f_type, '__args__'):
+                args = f_type.__args__
+                # Get origin name
+                if hasattr(origin, '__name__'):
+                    origin_name = origin.__name__
+                elif hasattr(origin, '_name'):
+                    origin_name = origin._name
+                else:
+                    origin_name = str(origin)
+
+                # Format args
+                arg_strs = []
+                for arg in args:
+                    if hasattr(arg, '__name__'):
+                        arg_strs.append(arg.__name__)
+                    else:
+                        arg_strs.append(str(arg).replace('typing.', ''))
+
+                return '{0}[{1}]'.format(origin_name, ','.join(arg_strs))
+
+        # Handle simple types
+        if hasattr(f_type, '__module__') and hasattr(f_type, '__qualname__'):
+            if f_type.__module__ in ('builtins', '__builtin__'):
+                return f_type.__qualname__
+            else:
+                return f_type.__module__ + '.' + f_type.__qualname__
+        elif hasattr(f_type, '__name__'):
+            return f_type.__name__
+        else:
+            type_str = str(f_type)
+            # Clean up typing annotations
+            type_str = type_str.replace('typing.', '')
+            if 'Union[' in type_str and 'NoneType' in type_str:
+                # Convert Union[X, NoneType] to X|None
+                type_str = type_str.replace('Union[', '')
+                type_str = type_str.replace(', NoneType]', '|None')
+                type_str = type_str.replace(', type(None)]', '|None')
+            return type_str
+    except (AttributeError, TypeError):
+        pass
+
+    return 'typing.Any'
 

@@ -14,7 +14,7 @@ from collections import OrderedDict
 import six
 
 from .abc_utils import update_abstractmethods
-from .type_utils import make_alias
+from .type_utils import make_alias, _get_type_str, MISSING
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
@@ -79,7 +79,7 @@ def _get_annotations(cls):
 
 
 class DataclassInstance(typing.Protocol):
-    __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, Field[typing.Any]]]
+    __dataclass_fields__= None # type: typing.ClassVar[typing.Dict[str, _Field[typing.Any]]]
 _DataclassT = typing.TypeVar("_DataclassT", bound=DataclassInstance)
 
 # Raised when an attempt is made to modify a frozen class.
@@ -97,12 +97,7 @@ class _HAS_DEFAULT_FACTORY_CLASS(object):
 _HAS_DEFAULT_FACTORY = _HAS_DEFAULT_FACTORY_CLASS()
 
 
-# A sentinel object to detect if a parameter is supplied or not.  Use
-# a class to give it a better repr.
-class _MISSING_TYPE(object):
-    pass
 
-MISSING = _MISSING_TYPE()
 
 
 # A sentinel object to indicate that following fields are keyword-only by
@@ -195,7 +190,7 @@ InitVar = make_alias("InitVar", "T")
 # Instances of Field are only ever created from within this module,
 # and only from the field() function, although Field instances are
 # exposed externally as (conceptually) read-only objects.
-class Field(object):
+class _Field(object):
     """"""
     _counter = 0
     __slots__ = ('name',
@@ -216,8 +211,8 @@ class Field(object):
 
     def __init__(self, default, default_factory, init, repr, hash, compare,
                  metadata, kw_only, doc, **kwargs):
-        self.order = Field._counter
-        Field._counter += 1
+        self.order = _Field._counter
+        _Field._counter += 1
         #self.__annotations__["type"];
         self.name = None
         #self.type = None
@@ -335,7 +330,7 @@ class _DataclassParams(object):
 
 
 def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
-          hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, _cls=Field):
+           hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, _cls=_Field):
     """Return an object to identify dataclass fields.
 
     default is the default value of the field.  default_factory is a
@@ -366,7 +361,7 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     # type: (typing.Type[T], typing.Optional[T], typing.Optional[typing.Callable[[], T]], bool, bool, typing.Optional[bool], bool, typing.Optional[bool], typing.Optional[typing.Mapping[typing.Any, typing.Any]], typing.Optional[str]) -> T
     """
 
-    :rtype: dataclasses.Field
+    :rtype: dataclasses._Field
     """
     mode = kwargs["mode"] if "mode" in kwargs else 1
 
@@ -391,7 +386,7 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
     #             _typ = type(default)
 
     f = _field(default, default_factory, init, repr, hash, compare,
-                  metadata, kw_only, doc, _cls=_oneshot if mode == 1 else Field)
+               metadata, kw_only, doc, _cls=Field if mode == 1 else _Field)
     #if _typ == MISSING and default != MISSING:
     #    _typ = type(default)
 
@@ -401,7 +396,7 @@ def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, rep
 
 
 # WIP descriptor delegation
-class _oneshot(Field):
+class Field(_Field):
     def __get__(self, instance, owner):
         # if not instance:
         #     if self.default is MISSING:
@@ -444,7 +439,7 @@ class _oneshot(Field):
 
     def __set_name__(self, owner, name):
         #super(Field).__set_name__(self)
-        Field.__set_name__(self, owner, name)
+        _Field.__set_name__(self, owner, name)
         self.name = name
     #     pass
 
@@ -782,7 +777,7 @@ def _get_field(cls, a_name, a_type, default_kw_only):
     # If the default value isn't derived from Field, then it's only a
     # normal default value.  Convert it to a Field().
     default = getattr(cls, a_name, MISSING)
-    if isinstance(default, Field):
+    if isinstance(default, _Field):
         f = default
     else:
         if isinstance(default, types.MemberDescriptorType):
@@ -895,7 +890,7 @@ def collect_annotations(cls):
     _existing_annotations = _get_annotations(cls)
     i = 0
     for name, value in cls.__dict__.items():
-        if isinstance(value, Field):
+        if isinstance(value, _Field):
             vt = value.type
             if vt is MISSING:
                 vt = _existing_annotations.get(name, vt) if _existing_annotations is not None else vt
@@ -1013,7 +1008,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     for f in cls_fields:
         fields[f.name] = f
 
-        if isinstance(getattr(cls, f.name, None), Field):
+        if isinstance(getattr(cls, f.name, None), _Field):
             if f.type is MISSING:
                 raise TypeError('{0!r} is a field but has no type annotation'.format(f.name))
             if f.default is MISSING:
@@ -1023,7 +1018,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     # Do we have any Field members that don't also have annotations?
     for name, value in cls.__dict__.items():
-        if ((isinstance(value, Field) and value.type is None)) and not name in cls_annotations:
+        if ((isinstance(value, _Field) and value.type is None)) and not name in cls_annotations:
             raise TypeError('{0!r} is a field but has no type annotation'.format(name))
 
     # Check rules that apply if we are derived from any dataclasses.
@@ -1159,30 +1154,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         # Generate signature-style docstring
         sig_fields = []
         for f in std_init_fields:
-            # Format the field type
-            if f.type is not None and f.type is not MISSING:
-                try:
-                    # Get the string representation of the type
-                    if hasattr(f.type, '__module__') and hasattr(f.type, '__qualname__'):
-                        if f.type.__module__ in ('builtins', '__builtin__'):
-                            type_str = f.type.__qualname__
-                        else:
-                            type_str = f.type.__module__ + '.' + f.type.__qualname__
-                    elif hasattr(f.type, '__name__'):
-                        type_str = f.type.__name__
-                    else:
-                        type_str = str(f.type)
-                        # Clean up typing annotations
-                        type_str = type_str.replace('typing.', '')
-                        type_str = type_str.replace('Union[', '')
-                        type_str = type_str.replace(', NoneType]', '|None')
-                        type_str = type_str.replace(', type(None)]', '|None')
-                        if type_str.endswith(']') and '|None' in type_str:
-                            type_str = type_str.replace(', None]', '|None')
-                except (AttributeError, TypeError):
-                    type_str = 'typing.Any'
-            else:
-                type_str = 'typing.Any'
+            type_str = _get_type_str(f.type)
 
             # Format field with or without default
             if f.default is not MISSING:
@@ -1198,8 +1170,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             else:
                 sig_fields.append('{}:{}'.format(f.name, type_str))
 
-        cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
-
+        if sig_fields:
+            cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
+        else:
+            cls.__doc__ = cls.__name__
     if match_args:
         _set_new_attribute(cls, '__match_args__',
                            tuple(f.name for f in std_init_fields))
@@ -1758,11 +1732,9 @@ def make_dataclass(
         ns.update(namespace)
         ns.update(defaults)
     # Create the class
-    cls = _make_class(cls_name, bases, OrderedDict(), exec_body_callback)#type(cls_name, bases, namespace)
-    #cls.__annotations__ = _saved_annotations
+    cls = _make_class(cls_name, bases, OrderedDict(), exec_body_callback)
     cls.__annotate__ = annotate_method
-    #pew = cls.__annotations__
-    #del pew
+
     # Set module
     if module is None:
         try:

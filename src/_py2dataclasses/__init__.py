@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from .abc_utils import ABC
 __all__ = ['dataclass',
            'field',
+           '_Field',
            'Field',
            'of',
            'FrozenInstanceError',
@@ -16,7 +17,7 @@ __all__ = ['dataclass',
            'make_dataclass',
            'replace',
            'is_dataclass',
-           '_oneshot',
+           #'_oneshot',
            'ABC',
            '_dataclass_getstate',
            '_dataclass_setstate',
@@ -28,6 +29,6 @@ __all__ = ['dataclass',
            ]
 
 
-from .dataclasses import dataclass, field, Field, FrozenInstanceError, InitVar, KW_ONLY, MISSING, fields, asdict, \
-    astuple, make_dataclass, replace, is_dataclass, of, _oneshot, \
-    _dataclass_getstate, _dataclass_setstate  # of_factory, of_typed, ann, IntField, typed
+from .dataclasses import dataclass, field, _Field, FrozenInstanceError, InitVar, KW_ONLY, MISSING, fields, asdict, \
+    astuple, make_dataclass, replace, is_dataclass, of, \
+    _dataclass_getstate, _dataclass_setstate, Field  # of_factory, of_typed, ann, IntField, typed

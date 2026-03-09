@@ -10,7 +10,7 @@ import src.dataclasses as py2dataclasses
 
 
 def field_adapter(*args, **kwargs):
-    kwargs.setdefault('mode', 0)
+    kwargs.setdefault('mode', 1)
     return py2dataclasses.field(*args, **kwargs)
 
 
@@ -35,7 +35,7 @@ def dataclass_adapter(cls=None, /, *, init=True, repr=True, eq=True, order=False
 def patch_module(target_module):
     field_list = ('fields', 'field', 'Field', 'dataclass', 'is_dataclass', 'replace',
                   'make_dataclass', 'asdict', 'astuple', 'FrozenInstanceError', 'MISSING',
-                  '_oneshot', 'InitVar', 'KW_ONLY')
+                  '_Field', 'InitVar', 'KW_ONLY')
     patch_map = {"field": field_adapter, "dataclass": dataclass_adapter}
     for one in field_list:
         if one in patch_map:

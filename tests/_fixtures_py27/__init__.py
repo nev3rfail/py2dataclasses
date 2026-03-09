@@ -24,14 +24,14 @@ from collections import OrderedDict
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.append(path)
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from dataclasses import fields, field, _Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses
 
 try:
     from dataclasses import _oneshot
 except:
-    from dataclasses import Field as _oneshot
+    from dataclasses import _Field as _oneshot
 
 try:
     import unittest2 as unittest
@@ -276,7 +276,7 @@ class TestCase(unittest.TestCase):
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
         for f in the_fields:
-            self.assertIn(type(f), [Field, _oneshot])
+            self.assertIn(type(f), [_Field, _oneshot])
             self.assertIn(f.name, C.__annotations__)
 
         self.assertEqual(len(the_fields), 3)
