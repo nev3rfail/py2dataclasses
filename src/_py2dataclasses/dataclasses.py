@@ -256,7 +256,7 @@ class _Field(object):
                 'doc={10!r},'
                 '_field_type={11})'
                 ).format(
-            self.name, self.type, self.default, self.default_factory,
+            self.name, None if self.type is MISSING else self.type, self.default, self.default_factory,
             self.init, self.repr, self.hash, self.compare,
             self.metadata, self.kw_only, self.doc, self._field_type)
 
@@ -1173,7 +1173,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         if sig_fields:
             cls.__doc__ = '{}({})'.format(cls.__name__, ', '.join(sig_fields))
         else:
-            cls.__doc__ = cls.__name__
+            cls.__doc__ = '{}()'.format(cls.__name__)
     if match_args:
         _set_new_attribute(cls, '__match_args__',
                            tuple(f.name for f in std_init_fields))

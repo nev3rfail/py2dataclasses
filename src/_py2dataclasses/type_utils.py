@@ -35,6 +35,9 @@ class GenericAlias(object):
         else:
             # typing objects, e.g. List[int]
             type_name = repr(self.type)
+        # For InitVar, always use 'dataclasses' as the module
+        if self.__class__.__name__ == 'InitVar':
+            return 'dataclasses.{0}[{1}]'.format(self.__class__.__name__, type_name)
         return '{0}.{1}[{2}]'.format(self.__class__.__module__, self.__class__.__name__, type_name)
 #f = typing.GenericMeta
 
@@ -138,13 +141,22 @@ def _get_type_str(f_type):
             origin = f_type.__origin__
             if hasattr(f_type, '__args__'):
                 args = f_type.__args__
-                # Get origin name
-                if hasattr(origin, '__name__'):
-                    origin_name = origin.__name__
-                elif hasattr(origin, '_name'):
-                    origin_name = origin._name
+
+                # Try to get the typing name from the type's representation
+                type_repr = repr(f_type)
+                # Check if it's from typing module - e.g. "typing.List[int]"
+                if 'typing.' in type_repr and '[' in type_repr:
+                    # Extract the typing name
+                    parts = type_repr.split('[')
+                    origin_name = parts[0].replace('typing.', '')
                 else:
-                    origin_name = str(origin)
+                    # Get origin name
+                    if hasattr(origin, '__name__'):
+                        origin_name = origin.__name__
+                    elif hasattr(origin, '_name'):
+                        origin_name = origin._name
+                    else:
+                        origin_name = str(origin)
 
                 # Format args
                 arg_strs = []
