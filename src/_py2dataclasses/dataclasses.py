@@ -528,7 +528,9 @@ class _FuncBuilder(object):
 
         # Now that we've generated the functions, assign them into cls.
         for name, fn in zip(self.names, fns):
-            fn.__qualname__ = '{0}.{1}'.format(cls.__name__, fn.__name__)
+            # Use __qualname__ if available (Python 3), otherwise use __name__
+            class_qualname = getattr(cls, '__qualname__', cls.__name__)
+            fn.__qualname__ = '{0}.{1}'.format(class_qualname, fn.__name__)
 
             # Apply method annotations if they were stored
             if name in self.method_annotations:
@@ -953,6 +955,9 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
     fields = OrderedDict()
 
+    # Save reference to the built-in repr before it's shadowed by the parameter
+    _builtin_repr = __builtins__.get('repr') if isinstance(__builtins__, dict) else getattr(__builtins__, 'repr')
+
     if cls.__module__ in sys.modules:
         globals = sys.modules[cls.__module__].__dict__
     else:
@@ -1181,7 +1186,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                 if f.default is None:
                     default_str = 'None'
                 elif isinstance(f.default, str):
-                    default_str = repr(f.default)
+                    default_str = _builtin_repr(f.default)
                 else:
                     default_str = str(f.default)
                 sig_fields.append('{}:{}={}'.format(f.name, type_str, default_str))
