@@ -1115,13 +1115,20 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
         #if flds:
         body = ['  return "{0}({1})".format({2})'.format(
-            cls.__qualname__ if sys.version_info >= (3,) else qualname(cls),
+            '{0}',  # Use {0} as placeholder for class name, will be filled at runtime
             repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
             ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
         ).replace(".format()", "")]
+
+        # Replace the placeholder with dynamic class name
         if flds:
+            body = ['  return "{0}({1})".format(self.__class__.__name__, {0})'.format(
+                repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
+                ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
+            )]
             decorator="@__dataclasses_recursive_repr()"
         else:
+            body = ['  return self.__class__.__name__ + "()"']
             decorator = None
 
         #if flds:
@@ -1171,8 +1178,8 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                                  '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
                                  '  return NotImplemented'],
                                 overwrite_error='Consider using functools.total_ordering'))
-    elif six.PY2:
-        # In Python 2, we need to explicitly prevent comparisons when order=False
+    elif six.PY2 and eq:
+        # In Python 2, we need to explicitly prevent comparisons when order=False but eq=True
         # In Python 3, this is automatic, but in Py2 objects can be compared by default
         for name, op in [('__lt__', '<'),
                          ('__le__', '<='),
@@ -1180,7 +1187,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__ge__', '>=')]:
             error_msg = "'{0}' not supported between instances of '{{0}}' and '{{0}}'".format(op)
             body = [
-                '  raise TypeError({0}.format(self.__class__.__name__))'.format(builtin_repr(error_msg))
+                '  raise TypeError({0}.format(self.__class__.__name__))'.format(_builtin_repr(error_msg))
             ]
             attach_debug_function(cls, *func_builder.add_fn(name,
                                 ('self', 'other'),
