@@ -1111,38 +1111,19 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     if repr:
         flds = [f for f in field_list if f.repr]
-        repr_fmt = ', '.join(['{0}={{{1}!r}}'.format(f.name, flds.index(f)) for f in flds])
 
-        #if flds:
-        body = ['  return "{0}({1})".format({2})'.format(
-            '{0}',  # Use {0} as placeholder for class name, will be filled at runtime
-            repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
-            ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
-        ).replace(".format()", "")]
-
-        # Replace the placeholder with dynamic class name
         if flds:
-            body = ['  return "{0}({1})".format(self.__class__.__name__, {0})'.format(
-                repr_fmt.replace('{', '{{').replace('}', '}}').replace('{{', '{').replace('!r}}', '!r}'),
-                ', '.join(['self.{0}'.format(f.name) for f in flds]) if flds else ''
-            )]
-            decorator="@__dataclasses_recursive_repr()"
+            # Build the field format string: x={0!r}, y={1!r}, z={2!r}
+            repr_fmt = ', '.join(['{0}={{{1}!r}}'.format(f.name, i) for i, f in enumerate(flds)])
+            # Build the values to format: self.x, self.y, self.z
+            field_values = ', '.join(['self.{0}'.format(f.name) for f in flds])
+            # Generate code that calls format at runtime
+            body = ['  return "{0}({1})".format(self.__class__.__name__, {0})'.format(repr_fmt, field_values)]
+            decorator = "@__dataclasses_recursive_repr()"
         else:
             body = ['  return self.__class__.__name__ + "()"']
             decorator = None
 
-        #if flds:
-        #     args_str = ', '.join(['self.{0}'.format(f.name) for f in flds])
-        #     # Build format string: {0}(x={1!r}, y={2!r})
-        #     field_formats = ', '.join(['{0}={{{1}!r}}'.format(f.name, i+1) for i, f in enumerate(flds)])
-        #     body = ['  cls_name = self.__class__.__qualname__ if hasattr(self.__class__, "__qualname__") else self.__class__.__name__',
-        #             '  return "{{0}}({0})".format(cls_name, {1})'.format(field_formats, args_str)]
-        # else:
-        # body = ['  cls_name = self.__class__.__qualname__ if hasattr(self.__class__, "__qualname__") else self.__class__.__name__',
-        #         '  return "{0}()".format(cls_name)']
-        #else:
-        #    body = ['  return __dataclasses_actual_recursive_repr(self)']
-        #    decorator=None
         attach_debug_function(cls, *func_builder.add_fn('__repr__',
                             ('self',),
                             body,
