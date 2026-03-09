@@ -485,9 +485,20 @@ def of(_typ):
 T = typing.TypeVar("T")
 
 
-def field(_typ=MISSING, default=MISSING, default_factory=MISSING, init=True, repr=True,
-          hash=None, compare=True, metadata=None, kw_only=MISSING, doc=None, **kwargs):
-    # type: (typing.Type[T], typing.Optional[T], typing.Optional[typing.Callable[[], T]], bool, bool, typing.Optional[bool], bool, typing.Optional[bool], typing.Optional[typing.Mapping[typing.Any, typing.Any]], typing.Optional[str]) -> T
+def field(
+        _typ=MISSING,  # type: typing.Type[T]
+        default=MISSING,  # type: typing.Optional[T]
+        default_factory=MISSING,  # type: typing.Optional[typing.Callable[[], T]]
+        init=True,  # type: bool
+        repr=True,  # type: bool
+        hash=None,  # type: typing.Optional[bool]
+        compare=True,  # type: bool
+        metadata=None,  # type: typing.Optional[typing.Mapping[typing.Any, typing.Any]]
+        kw_only=MISSING,  # type: typing.Union[bool, typing.Any]
+        doc=None,  # type: typing.Optional[str]
+        **kwargs
+):
+    # type: (...) -> T
     mode = kwargs["mode"] if "mode" in kwargs else 1
     f = _field(default, default_factory, init, repr, hash, compare,
                metadata, kw_only, doc, _cls=Field if mode == 1 else _Field)
