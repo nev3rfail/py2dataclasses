@@ -14,7 +14,8 @@ jobs:
           - python-version: "2.7"
             os: ubuntu-latest
             suffix: "2"
-            container: coatldev/six:latest
+            container:
+              image: coatldev/six:latest
             tox-env: "test_ported_on_portedlib_py27"
           - python-version: "3.14"
             os: ubuntu-latest
@@ -36,6 +37,8 @@ jobs:
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v5
+      - name: Install deps
+        run: apt-get install --yes gpg
       - name: Install tox
         run: python${{ matrix.suffix }} -m pip install tox
       - name: Run tox
