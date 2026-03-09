@@ -1176,9 +1176,10 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
-            error_msg = "'{0}' not supported between instances of '{{0}}' and '{{0}}'".format(op)
+            error_msg = "'{}' not supported between instances of '{{1}}' and '{{0}}'".format(op)
+
             body = [
-                '  raise TypeError({0}.format(self.__class__.__name__))'.format(_builtin_repr(error_msg))
+                "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
             ]
             attach_debug_function(cls, *func_builder.add_fn(name,
                                 ('self', 'other'),
