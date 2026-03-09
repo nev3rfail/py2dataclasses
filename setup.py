@@ -21,7 +21,8 @@ setup(
     packages=find_packages('src'),
     python_requires='>=2.7',
     install_requires=[
-        'typing>=3.7, unittest-xml-reporting>=1.17.0; python_version<"3.5"',
+        'typing>=3.7; python_version<"3.5"',
+        'unittest-xml-reporting>=1.17.0; python_version<"3.5"'
         'typing-extensions>=3.7; python_version<"3.8"',
         'dictproxyhack>=1.1; python_version<"3.0"',
         'funcsigs>=1.0; python_version<"3.0"',
