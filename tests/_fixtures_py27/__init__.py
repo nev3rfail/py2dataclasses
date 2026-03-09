@@ -583,8 +583,14 @@ class TestCase(unittest.TestCase):
                                           lambda a, b: a >= b]):
                     with self.subTest(idx=idx):
                         with self.assertRaisesRegexp(TypeError,
-                                                     "not supported between instances"):
+                                                     "not supported between instances of '{0}' and '{0}'".format(cls.__name__)):
                             fn(cls(), cls())
+
+        @dataclass(order=True)
+        class C(object):
+            pass
+        self.assertLessEqual(C(), C())
+        self.assertGreaterEqual(C(), C())
 
     def test_simple_compare(self):
         # Ensure that order=False is the default.
@@ -663,6 +669,48 @@ class TestCase(unittest.TestCase):
         self.assertEqual(c0, c1)
         self.assertIsNot(c0.y, c1.y)
         self.assertEqual(astuple(C(5, [1])), (5, [1]))
+
+        # Test a factory that returns a shared list.
+        l = []
+        @dataclass
+        class C(object):
+            x = field(int)
+            y = field(list, default_factory=lambda: l)
+
+        c0 = C(3)
+        c1 = C(3)
+        self.assertEqual(c0.x, 3)
+        self.assertEqual(c0.y, [])
+        self.assertEqual(c0, c1)
+        self.assertIs(c0.y, c1.y)
+        self.assertEqual(astuple(C(5, [1])), (5, [1]))
+
+        # Test various other field flags.
+        # repr
+        @dataclass
+        class C(object):
+            x = field(list, default_factory=list, repr=False)
+        self.assertEqual(repr(C()), 'TestCase.test_default_factory.<locals>.C()')
+        self.assertEqual(C().x, [])
+
+        # hash
+        @dataclass(unsafe_hash=True)
+        class C(object):
+            x = field(list, default_factory=list, hash=False)
+        self.assertEqual(astuple(C()), ([],))
+        self.assertEqual(hash(C()), hash(()))
+
+        # init (see also test_default_factory_with_no_init)
+        @dataclass
+        class C(object):
+            x = field(list, default_factory=list, init=False)
+        self.assertEqual(astuple(C()), ([],))
+
+        # compare
+        @dataclass
+        class C(object):
+            x = field(list, default_factory=list, compare=False)
+        self.assertEqual(C(), C([1]))
 
     def test_missing_default(self):
         # Test that MISSING works the same as a default not being specified.
@@ -3082,17 +3130,78 @@ class TestHash(unittest.TestCase):
 
 
     def test_hash_no_args(self):
-        # Test dataclasses with no hash= argument.
+        # Test dataclasses with no hash= argument.  This exists to
+        #  make sure that if the @dataclass parameter name is changed
+        #  or the non-default hashing behavior changes, the default
+        #  hashability keeps working the same way.
+
         class Base(object):
             def __hash__(self):
                 return 301
 
-        # frozen=True should auto-generate __hash__
-        @dataclass(frozen=True)
-        class C(Base):
-            i = field(int)
+        # If frozen or eq is None, then use the default value (do not
+        #  specify any value in the decorator).
+        for frozen, eq,    base,   expected       in [
+            (None,  None,  object, 'unhashable'),
+            (None,  None,  Base,   'unhashable'),
+            (None,  False, object, 'object'),
+            (None,  False, Base,   'base'),
+            (None,  True,  object, 'unhashable'),
+            (None,  True,  Base,   'unhashable'),
+            (False, None,  object, 'unhashable'),
+            (False, None,  Base,   'unhashable'),
+            (False, False, object, 'object'),
+            (False, False, Base,   'base'),
+            (False, True,  object, 'unhashable'),
+            (False, True,  Base,   'unhashable'),
+            (True,  None,  object, 'tuple'),
+            (True,  None,  Base,   'tuple'),
+            (True,  False, object, 'object'),
+            (True,  False, Base,   'base'),
+            (True,  True,  object, 'tuple'),
+            (True,  True,  Base,   'tuple'),
+            ]:
 
-        self.assertEqual(hash(C(10)), hash((10,)))
+            with self.subTest(frozen=frozen, eq=eq, base=base, expected=expected):
+                # First, create the class.
+                if frozen is None and eq is None:
+                    @dataclass
+                    class C(base):
+                        i = field(int)
+                elif frozen is None:
+                    @dataclass(eq=eq)
+                    class C(base):
+                        i = field(int)
+                elif eq is None:
+                    @dataclass(frozen=frozen)
+                    class C(base):
+                        i = field(int)
+                else:
+                    @dataclass(frozen=frozen, eq=eq)
+                    class C(base):
+                        i = field(int)
+
+                # Now, make sure it hashes as expected.
+                if expected == 'unhashable':
+                    c = C(10)
+                    with self.assertRaisesRegexp(TypeError, 'unhashable type'):
+                        hash(c)
+
+                elif expected == 'base':
+                    self.assertEqual(hash(C(10)), 301)
+
+                elif expected == 'object':
+                    # I'm not sure what test to use here.  object's
+                    #  hash isn't based on id(), so calling hash()
+                    #  won't tell us much.  So, just check the
+                    #  function used is object's.
+                    self.assertIs(C.__hash__, object.__hash__)
+
+                elif expected == 'tuple':
+                    self.assertEqual(hash(C(42)), hash((42,)))
+
+                else:
+                    assert False, 'unknown value for expected={0!r}'.format(expected)
 
     def test_0_field_hash(self):
         @dataclass(frozen=True)
