@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - python-version: "2.7"
-            #os: ubuntu-20.04
+            os: linux
             container: python:2.7.18-buster
           - python-version: "3.14"
             os: ubuntu-latest
