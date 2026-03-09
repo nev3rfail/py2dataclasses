@@ -1023,6 +1023,13 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     KW_ONLY_seen = False
     dataclasses = sys.modules[__name__]
     for name, type_ in cls_annotations.items():
+        # Convert _ANY_MARKER to ForwardRef('Any') for PEP 649 compatibility in field types
+        if type_ is _ANY_MARKER:
+            if _annotationlib is not None:
+                type_ = _annotationlib.ForwardRef('Any', module='typing')
+            else:
+                # Import typing only when needed
+                type_ = typing.Any
         # See if this is a marker to change the value of kw_only.
         if (_is_kw_only(type_, dataclasses)
                 or (isinstance(type_, str)
@@ -1736,8 +1743,19 @@ def make_dataclass(
         annotations[name] = tp
     #_saved_annotations = OrderedDict(annotations)
     #namespace.update(defaults)
-    if _annotationlib is None:
-        namespace['__annotations__'] = annotations
+    # For __annotations__, resolve _ANY_MARKER but avoid importing typing if not needed
+    resolved_annotations = OrderedDict()
+    for name, tp in annotations.items():
+        if tp is _ANY_MARKER:
+            # Check if typing is already imported
+            if 'typing' in sys.modules:
+                resolved_annotations[name] = sys.modules['typing'].Any
+            else:
+                # Keep the marker for now, will be resolved in _process_class
+                resolved_annotations[name] = _ANY_MARKER
+        else:
+            resolved_annotations[name] = tp
+    namespace['__annotations__'] = resolved_annotations
     value_blocked = [True]  # mutable for closure
     # Update namespace
     def annotate_method(format=None):
