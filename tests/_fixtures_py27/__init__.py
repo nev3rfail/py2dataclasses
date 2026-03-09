@@ -24,7 +24,7 @@ from collections import OrderedDict
 
 path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
 sys.path.append(path)
-from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
+from dataclasses import fields, field, Field, _oneshot, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses
 
@@ -41,7 +41,8 @@ import weakref
 try:
     import types.GenericAlias as GenericAlias
 except ImportError:
-    from _py2dataclasses import type_utils as __type_utils
+    from _py2dataclasses import type_utils as __type_utils, _oneshot
+
     #import __abc_utils.ABC as ABC
     GenericAlias = __type_utils.GenericAlias
 
@@ -244,7 +245,7 @@ class TestCase(unittest.TestCase):
         # the_fields is a tuple of 3 items
         self.assertIsInstance(the_fields, tuple)
         for f in the_fields:
-            self.assertIn(type(f), [Field, _oneshot])
+            self.assertIn(type(f), [_Field, _oneshot])
             self.assertIn(f.name, C.__annotations__)
 
         self.assertEqual(len(the_fields), 3)

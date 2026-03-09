@@ -1,5 +1,7 @@
 from __future__ import absolute_import
 
+import os.path
+
 import six
 import sys
 if six.PY2:
@@ -19,6 +21,14 @@ def parse_testname(name):
     else:
         return name
 
+def remove_fake_dataclasses_from_path():
+    # __file__ is in `tests/`, so we're going one level above and removing both it and src
+
+    p = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    sys.path.remove(p)
+    p = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+    sys.path.remove(p)
+    pass
 
 def get_patchers(runtime, lib, tests):
     name = parse_testname(tests)
@@ -26,7 +36,7 @@ def get_patchers(runtime, lib, tests):
     if runtime == "py3" and lib == STANDARD and tests == STANDARD:
         #from . import _fixtures_compat_stdlib_to_backport
         #patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
-        patch_sys, patch_mod = lambda: None, lambda mod: mod
+        patch_sys, patch_mod = lambda: remove_fake_dataclasses_from_path(), lambda mod: mod
     elif runtime == "py3" and lib == STANDARD and tests == BACKPORTED:
         from . import _fixtures_compat_stdlib_to_backport
         patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
