@@ -16,6 +16,9 @@ def qualname(o):
     existing = getattr(o, "__qualname__", None)
     if existing:
         return existing
+
+    return _qualname(o)
+def _qualname(o):
     klass = o
     module = klass.__module__
     if module == '__builtin__':

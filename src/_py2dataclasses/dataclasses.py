@@ -19,7 +19,8 @@ from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 #from cheap_repr import cheap_repr
 builtin_repr = repr
-from .class_utils import is_descriptor, qualname
+from .class_utils import is_descriptor, qualname, _qualname
+
 if six.PY2:
     from dictproxyhack import dictproxy as _dict_proxy
 else:
@@ -1505,7 +1506,7 @@ class Qualname(object):
     def __init__(self, cls):
         self.qualname = qualname(cls)
     def __get__(self, instance, owner):
-        return self.qualname if instance else owner.qualname
+        return self.qualname if instance else _qualname(owner)
 
 
 def _add_slots(cls, is_frozen, weakref_slot, defined_fields):
