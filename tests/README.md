@@ -1,7 +1,7 @@
 - This directory is a test dir for the backport of Python 3 dataclasses to python 2.7.
 > The backport of tests is "human-driven AI port" meaning tests were translated from py3 to py2 by neural networks, and then were fixed by human.
-- _fixtures_py314 dir contains native python 3.14 tests for the `dataclasses` lib
-- _fixtures_py27 dir contains tests ported from python 3.14 to python 2.7 as closely as possible
+- _fixtures_py314 dir contains native python 3.14 tests for the `dataclasses` lib. Test themselves are in `__init__.py`
+- _fixtures_py27 dir contains tests ported from python 3.14 to python 2.7 as closely as possible (WIP).  Test themselves are in `__init__.py` 
 - test_native_on_nativelib.py -- runs native python 3.14 tests on stdlib `dataclasses`
 - test_native_on_portedlib.py -- runs native python 3.14 tests on backported `dataclasses` (py2dataclasses)
 - test_ported_on_nativelib.py -- runs ported to py2.7 tests on stdlib `dataclasses`
