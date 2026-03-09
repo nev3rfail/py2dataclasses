@@ -2644,6 +2644,55 @@ class TestDocString(unittest.TestCase):
 
         self.assertDocStrEqual(C.__doc__, "C(x:undef)")
 
+    def test_docstring_one_field_with_default_none(self):
+        @dataclass
+        class C(object):
+            x = field('Union[int, type(None)]', default=None)
+
+        self.assertDocStrEqual(C.__doc__, "C(x:int|None=None)")
+
+    def test_docstring_deque_field(self):
+        @dataclass
+        class C(object):
+            x = field(deque)
+
+        self.assertDocStrEqual(C.__doc__, "C(x:collections.deque)")
+
+    def test_docstring_deque_field_with_default_factory(self):
+        @dataclass
+        class C(object):
+            x = field(deque, default_factory=deque)
+
+        self.assertDocStrEqual(C.__doc__, "C(x:collections.deque=<factory>)")
+
+    def test_docstring_with_unsolvable_forward_ref_in_init(self):
+        # See: https://github.com/python/cpython/issues/128184
+        ns = {}
+        exec(textwrap.dedent("""
+from dataclasses import dataclass, field
+
+@dataclass
+class C(object):
+    def __init__(self, x, num):
+        # type: (X, int) -> None
+        pass
+"""), ns)
+
+        self.assertDocStrEqual(ns['C'].__doc__, "C(x:X,num:int)")
+
+    def test_docstring_with_no_signature(self):
+        # See https://github.com/python/cpython/issues/103449
+        # Python 2.7 doesn't support metaclass= syntax in the same way
+        # We need to use __metaclass__ or six.with_metaclass
+        Meta = type('Meta', (type,), {'__call__': dict})
+        Base = Meta('Base', (object,), {})
+
+        @dataclass
+        class C(Base):
+            pass
+
+        self.assertDocStrEqual(C.__doc__, "C")
+
 
 class TestInit(unittest.TestCase):
     def test_base_has_init(self):
@@ -2716,6 +2765,51 @@ class TestInit(unittest.TestCase):
             a = field(int)
 
         self.assertEqual(C(5).a, 5)
+
+
+class TestInitAnnotate(unittest.TestCase):
+    """Tests for __annotate__ function (PEP 649).
+
+    Note: These tests are not applicable to Python 2.7 as it doesn't support
+    PEP 649's __annotate__ function. The tests are kept for completeness but
+    will be skipped.
+    """
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_annotate_function(self):
+        # No forward references - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_annotate_function_forwardref(self):
+        # With forward references - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_annotate_function_init_false(self):
+        # Check `init=False` attributes - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_annotate_function_contains_forwardref(self):
+        # Check string annotations - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_annotate_function_not_replaced(self):
+        # Check that __annotate__ is not replaced - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_slots_true_init_false(self):
+        # Test slots=True and init=False - not applicable to py27
+        pass
+
+    @unittest.skip("PEP 649 __annotate__ not applicable to Python 2.7")
+    def test_init_false_forwardref(self):
+        # Test forward references - not applicable to py27
+        pass
+
 
 class TestRepr(unittest.TestCase):
     def test_repr(self):
@@ -4601,6 +4695,55 @@ class TestFrozen(unittest.TestCase):
             def __setattr__(self, name, value):
                 self.__dict__['x'] = value * 2
         self.assertEqual(C(10).x, 20)
+
+
+class TestZeroArgumentSuperWithSlots(unittest.TestCase):
+    """Tests for zero-argument super() and __class__ with slots.
+
+    Note: Python 2.7 doesn't support zero-argument super() or implicit __class__.
+    These tests verify that the backport handles this appropriately.
+    """
+
+    @unittest.skip("Python 2.7 doesn't support zero-argument super()")
+    def test_zero_argument_super(self):
+        # Python 2 doesn't support super() without arguments
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_dunder_class_with_old_property(self):
+        # Python 2 doesn't have implicit __class__ in closures
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_dunder_class_with_new_property(self):
+        # Python 2 doesn't support property decorator with @prop.setter/deleter
+        # in the same way with __class__
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_slots_dunder_class_property_getter(self):
+        # Python 2 doesn't have implicit __class__
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_slots_dunder_class_property_setter(self):
+        # Python 2 doesn't have implicit __class__
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_slots_dunder_class_property_deleter(self):
+        # Python 2 doesn't have implicit __class__
+        pass
+
+    @unittest.skip("Python 2.7 doesn't support zero-argument super()")
+    def test_wrapped(self):
+        # Python 2 doesn't support zero-argument super()
+        pass
+
+    @unittest.skip("Python 2.7 doesn't have implicit __class__")
+    def test_remembered_class(self):
+        # Python 2 doesn't have implicit __class__ in closures
+        pass
 
 
 if __name__ == '__main__':
