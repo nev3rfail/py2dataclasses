@@ -10,11 +10,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        python-version: ["2.7", "3.14", "3.x"]
+        include:
+          - python-version: "2.7"
+            os: ubuntu-20.04
+          - python-version: "3.14"
+            os: ubuntu-latest
+          - python-version: "3.x"
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
