@@ -21,11 +21,12 @@ setup(
     packages=find_packages('src'),
     python_requires='>=2.7',
     install_requires=[
-        'typing>=3.7; python_version<"3.5"',
+        'typing>=3.7, unittest-xml-reporting>=1.17.0; python_version<"3.5"',
         'typing-extensions>=3.7; python_version<"3.8"',
         'dictproxyhack>=1.1; python_version<"3.0"',
         'funcsigs>=1.0; python_version<"3.0"',
-        'six>=1.17'
+        'six>=1.17',
+        'unittest-xml-reporting>=6.0.2; python_version>"3.5"'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

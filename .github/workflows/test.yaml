@@ -39,3 +39,9 @@ jobs:
       - name: Run tox
         run: tox -e ${{ matrix.tox-env }}
         continue-on-error: true
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV }}
+          file: dist/junit/${{ matrix.tox-env }}.xml
