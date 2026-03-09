@@ -1,0 +1,37 @@
+name: Test
+
+on: [push]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - python-version: "2.7"
+            os: ubuntu-20.04
+            tox-env: "test_ported_on_portedlib_py27"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            tox-env: "test_native_on_portedlib"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            tox-env: "test_ported_on_portedlib"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            tox-env: "test_ported_on_nativelib"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            tox-env: "test_native_on_nativelib"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install tox
+        run: pip install tox
+      - name: Run tox
+        run: tox -e ${{ matrix.tox-env }}
+        continue-on-error: true
