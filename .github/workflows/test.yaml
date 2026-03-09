@@ -43,5 +43,6 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
         with:
-          token: ${{ secrets.CODECOV }}
+          token: ${{ secrets.CODECOV_TOKEN }}
           file: dist/junit/${{ matrix.tox-env }}.xml
+          slug: nev3rfail/py2dataclasses/${{ matrix.tox-env }}
