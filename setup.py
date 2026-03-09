@@ -27,7 +27,7 @@ setup(
         'dictproxyhack>=1.1; python_version<"3.0"',
         'funcsigs>=1.0; python_version<"3.0"',
         'six>=1.17',
-        'unittest-xml-reporting>=6.0.2; python_version>"3.5"'
+        'unittest-xml-reporting>=4.0.0; python_version>"3.5"'
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
