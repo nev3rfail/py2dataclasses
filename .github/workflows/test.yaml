@@ -104,6 +104,7 @@ jobs:
 
             core.setOutput("json", JSON.stringify(badge, null, 2));
       - uses: Wandalen/wretry.action@master
+        id: uploadit
         name: Upload badge
         env:
           GITHUB_TOKEN: ${{ secrets.GIST_RW }}
