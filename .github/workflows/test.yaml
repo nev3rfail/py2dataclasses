@@ -81,25 +81,28 @@ jobs:
 #          content: ${{ steps.processed_json.outputs.json }}
       - name: Build badge json
         id: badge
-        run: |
-          badge_json=$(jq -n \
-            --argjson data '${{ steps.processed_json.outputs.json }}' \
-            --arg label "${{ matrix.tox-env }}" '
-            {
-              schemaVersion: 1,
-              label: $label,
-              message: "[\($data.summary.passed)/\($data.summary.tests)], E: \($data.summary.errors)",
-              color: (if $data.summary.errors > 0 then "red"
-                      elif $data.summary.failures > 0 then "yellow"
-                      else "brightgreen"
-                      end)
-            }')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const data = JSON.parse(`${{ steps.processed_json.outputs.json }}`);
 
-          {
-            echo "json<<EOF"
-            echo "$badge_json"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+            const total = data.summary.tests;
+            const passed = data.summary.passed;
+            const errors = data.summary.errors;
+            const failures = data.summary.failures;
+
+            let color = "brightgreen";
+            if (errors > 0) color = "red";
+            else if (failures > 0) color = "yellow";
+
+            const badge = {
+              schemaVersion: 1,
+              label: process.env.TOX_ENV_NAME,
+              message: `[${passed}/${total}], E: ${errors}`,
+              color: color
+            };
+
+            core.setOutput("json", JSON.stringify(badge, null, 2));
       - name: Upload badge
         uses: gorgbus/gist-actions@main
         env:
