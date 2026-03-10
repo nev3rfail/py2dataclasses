@@ -8,7 +8,7 @@ with io.open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
 def version_scheme(version):
-    if version.distance == 0:
+    if not version.distance:
         return version.format_with("{tag}")
     return version.format_with("{tag}+{distance}.{node}")
 

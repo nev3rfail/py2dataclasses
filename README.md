@@ -1,6 +1,6 @@
 # py2dataclasses
 
-This repo is a PEP-557 compatible dataclass implementation for Python 2.7.
+This project is a PEP-557 compatible dataclass implementation for Python 2.7.
 
 ## Usage
 
