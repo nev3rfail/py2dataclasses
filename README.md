@@ -4,7 +4,7 @@ This project is a PEP-557 compatible dataclass implementation for Python 2.7.
 
 ## Usage
 
-On Python 2.7 there is no annotation syntax (`x: int`), so fields are declared using `field()` descriptors:
+Python 2.7 don't have annotation syntax (i.e `x: int`), so fields are declared using `field()` descriptors:
 
 ```python
 from dataclasses import dataclass, field
