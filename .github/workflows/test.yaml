@@ -5,7 +5,9 @@ on: [push]
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
+env:
+  # Setting an environment variable with the value of a configuration variable
+  GIST_STORAGE: ${{ vars.GIST_STORAGE }}
 jobs:
   build:
     strategy:
