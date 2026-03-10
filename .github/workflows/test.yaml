@@ -37,6 +37,11 @@ jobs:
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Python
+        if: matrix.python-version != '2.7'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
       - name: Install deps
         # coatldev/six:latest doesnt have gpg installed so we need to do this.
         #   TODO: maybe there is a way to extend container right here in the yml file?
