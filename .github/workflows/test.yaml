@@ -61,3 +61,16 @@ jobs:
           name: ${{ matrix.tox-env }}
           flags: ${{ matrix.tox-env }}
           slug: nev3rfail/py2dataclasses
+      - name: Process test XML
+        id: processed_json
+        run: |
+          cat ${{ matrix.tox-env }}.xml | python${{ matrix.suffix }} -m tests._xmlprocessor
+      - name: Update gist
+        uses: gorgbus/gist-actions@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
+        with:
+          action: "update"
+          gist_id: ${{ env.GIST_STORAGE }}
+          file_name: py2dataclasses.tests.${{ matrix.tox-env }}.json
+          content: ${{ steps.processed_json.outputs.content }}

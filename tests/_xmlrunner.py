@@ -19,6 +19,8 @@ def _report_testsuite(suite_name, tests, xml_document, parentElement,
             n = qual + "/__init__.py"
             if os.path.exists(n):
                 suite.setAttribute("file", n)
+    name = suite.getAttribute("name")
+    suite.setAttribute("name", name.split("-")[0])
     return suite
 
 original_XMLTestResult._report_testsuite = staticmethod(_report_testsuite)
