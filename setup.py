@@ -19,6 +19,7 @@ setup(
     long_description_content_type='text/markdown',
     author='nev3rfail',
     license='MIT',
+    license_files=["LICEN[CS]E*"],
     url='https://github.com/nev3rfail/py2dataclasses',
     package_dir={'': 'src'},
     py_modules=['dataclasses', 'py2dataclasses'],
