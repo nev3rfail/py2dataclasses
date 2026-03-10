@@ -103,12 +103,16 @@ jobs:
             };
 
             core.setOutput("json", JSON.stringify(badge, null, 2));
-      - name: Upload badge
-        uses: gorgbus/gist-actions@main
+      - uses: Wandalen/wretry.action@master
+        name: Upload badge
         env:
           GITHUB_TOKEN: ${{ secrets.GIST_RW }}
         with:
-          action: "update"
-          gist_id: ${{ env.GIST_STORAGE }}
-          file_name: badge.${{ matrix.tox-env }}.json
-          content: ${{ steps.badge.outputs.json }}
+          action: gorgbus/gist-actions@main
+          attempt_limit: 10
+          attempt_delay: 2000
+          with: |
+            action: "update"
+            gist_id: ${{ env.GIST_STORAGE }}
+            file_name: badge.${{ matrix.tox-env }}.json
+            content: ${{ steps.badge.outputs.json }}
