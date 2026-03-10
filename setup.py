@@ -1,15 +1,19 @@
 """Setup script for py2dataclasses - works on Python 2.7+ and Python 3."""
 from __future__ import print_function
+
 import io
 from setuptools import setup, find_packages
-
 # Read the README
 with io.open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
+def version_scheme(version):
+    if version.distance == 0:
+        return version.format_with("{tag}")
+    return version.format_with("{tag}+{distance}.{node}")
+
 setup(
     name='py2dataclasses',
-    version='3.14.14',
     description='PEP-557 compatible dataclasses backport for Python 2.7+',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -20,6 +24,13 @@ setup(
     py_modules=['dataclasses', 'py2dataclasses'],
     packages=find_packages('src'),
     python_requires='>=2.7',
+    use_scm_version={
+        "root": ".",
+        "relative_to": __file__,
+        "version_scheme": version_scheme,
+        "local_scheme": "no-local-version",
+    },
+    setup_requires=["setuptools_scm"],
     install_requires=[
         'typing>=3.7; python_version<"3.5"',
         'unittest-xml-reporting>=1.17.0; python_version<"3.5"',
