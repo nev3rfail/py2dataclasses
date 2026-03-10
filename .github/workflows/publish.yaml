@@ -8,11 +8,11 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Release tag'
+      ref:
+        description: 'Release commit or tag'
         required: false
         type: string
-        default: 'v3.14.9999'
+        default: ''
 
 jobs:
   publish:
@@ -21,12 +21,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
 
       - name: Download artifacts
         uses: dawidd6/action-download-artifact@v3
         with:
           workflow: build.yml
           workflow_conclusion: success
+          commit: ${{ inputs.ref || github.sha }}
           path: dist
 
       - name: Install Twine
