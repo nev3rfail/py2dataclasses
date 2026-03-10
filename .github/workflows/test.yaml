@@ -79,3 +79,33 @@ jobs:
           gist_id: ${{ env.GIST_STORAGE }}
           file_name: py2dataclasses.tests.${{ matrix.tox-env }}.json
           content: ${{ steps.processed_json.outputs.json }}
+      - name: Build badge json
+        id: badge
+        run: |
+          badge_json=$(jq -n \
+            --argjson data '${{ steps.processed_json.outputs.json }}' \
+            --arg label "${{ matrix.tox-env }}" '
+            {
+              schemaVersion: 1,
+              label: $label,
+              message: "[\($data.summary.passed)/\($data.summary.tests)], E: \($data.summary.errors)",
+              color: (if $data.summary.errors > 0 then "red"
+                      elif $data.summary.failures > 0 then "yellow"
+                      else "brightgreen"
+                      end)
+            }')
+
+          {
+            echo "json<<EOF"
+            echo "$badge_json"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload badge
+        uses: gorgbus/gist-actions@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
+        with:
+          action: "update"
+          gist_id: ${{ env.GIST_STORAGE }}
+          file_name: badge.${{ matrix.tox-env }}.json
+          content: ${{ steps.badge.outputs.json }}
