@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """Setup script for py2dataclasses - works on Python 2.7+ and Python 3."""
 from __future__ import print_function
 
@@ -15,7 +17,7 @@ def version_scheme(version):
 setup(
     name='py2dataclasses',
     description='PEP-557 compatible dataclasses backport for Python 2.7+',
-    long_description="License-File: LICENSE\n"+long_description,
+    long_description=long_description,
     long_description_content_type='text/markdown',
     author='nev3rfail',
     license='MIT',
