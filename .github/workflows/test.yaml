@@ -70,15 +70,15 @@ jobs:
           python${{ matrix.suffix }} -m tests._xmlprocessor < ${{ matrix.tox-env }}.xml >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Update gist
-        uses: gorgbus/gist-actions@main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
-        with:
-          action: "update"
-          gist_id: ${{ env.GIST_STORAGE }}
-          file_name: py2dataclasses.tests.${{ matrix.tox-env }}.json
-          content: ${{ steps.processed_json.outputs.json }}
+#      - name: Update gist
+#        uses: gorgbus/gist-actions@main
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
+#        with:
+#          action: "update"
+#          gist_id: ${{ env.GIST_STORAGE }}
+#          file_name: py2dataclasses.tests.${{ matrix.tox-env }}.json
+#          content: ${{ steps.processed_json.outputs.json }}
       - name: Build badge json
         id: badge
         run: |
