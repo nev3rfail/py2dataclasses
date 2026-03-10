@@ -97,7 +97,7 @@ jobs:
 
             const badge = {
               schemaVersion: 1,
-              label: process.env.TOX_ENV_NAME,
+              label: ${{ matrix.tox-env }},
               message: `[${passed}/${total}], E: ${errors}`,
               color: color
             };
