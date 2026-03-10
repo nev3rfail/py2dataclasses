@@ -43,14 +43,15 @@ jobs:
           python${{ matrix.suffix }} -m pip install --upgrade pip
           python${{ matrix.suffix }} -m pip install setuptools wheel
 
-      - name: Build dev package
-        if: matrix.suffix == ''
+      - name: Build package of py2
+        if: matrix.suffix == '2'
         run: |
           python${{ matrix.suffix }} setup.py sdist
 
-      - name: Build package
+      - name: Build package of py3 and sdist
+        if: matrix.suffix == ''
         run: |
-          python${{ matrix.suffix }} setup.py bdist_wheel
+          python${{ matrix.suffix }} -m build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
