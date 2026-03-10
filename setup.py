@@ -45,6 +45,8 @@ setup(
         'funcsigs>=1.0; python_version<"3.0"',
         'six>=1.17',
         'unittest-xml-reporting>=4.0.0; python_version>"3.5"',
+        'coverage>=7.13.4; python_version>"3.0"',
+        'coverage==5.5; python_version<"3.0"',
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
