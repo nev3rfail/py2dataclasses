@@ -13,6 +13,15 @@ def classify_testcase(case):
         return 'skipped'
     return 'passed'
 
+def get_field_caption(classified):
+    if classified == 'failure':
+        return 'failures'
+    if classified == 'error':
+        return 'errors'
+    if classified == 'skipped':
+        return 'skipped'
+    return 'passed'
+
 
 def junit_summary(xml_string):
     root = ET.fromstring(xml_string)
@@ -41,10 +50,10 @@ def junit_summary(xml_string):
             status = classify_testcase(case)
 
             suite_counts["tests"] += 1
-            suite_counts[status if status != "failure" else "failures"] += 1
+            suite_counts[get_field_caption(status)] += 1
 
             global_counts["tests"] += 1
-            global_counts[status if status != "failure" else "failures"] += 1
+            global_counts[get_field_caption(status)] += 1
 
         suites.append(suite_counts)
 
