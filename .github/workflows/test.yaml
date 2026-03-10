@@ -47,8 +47,8 @@ jobs:
       - name: Install deps
         # coatldev/six:latest doesnt have gpg installed so we need to do this.
         #   TODO: maybe there is a way to extend container right here in the yml file?
-        if: matrix.suffix == '2'
-        run: apt-get update --quiet && apt-get install --yes gnupg
+        #if: matrix.suffix == '2'
+        run: apt-get update --quiet && apt-get install --yes gnupg jq
       - name: Install tox and coverage
         run: python${{ matrix.suffix }} -m pip install tox coverage
       - name: Run tox
