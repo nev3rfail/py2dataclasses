@@ -2,12 +2,12 @@ import sys
 import os
 import unittest
 
-_project_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-
-import src.dataclasses as py2dataclasses
-
+# _project_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# if _project_root not in sys.path:
+#     sys.path.insert(0, _project_root)
+#
+# import src.dataclasses as py2dataclasses
+from src import py2dataclasses
 
 def field_adapter(*args, **kwargs):
     kwargs.setdefault('mode', 1)
