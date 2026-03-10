@@ -75,4 +75,4 @@ jobs:
           action: "update"
           gist_id: ${{ env.GIST_STORAGE }}
           file_name: py2dataclasses.tests.${{ matrix.tox-env }}.json
-          content: ${{ steps.processed_json.outputs.content }}
+          content: ${{join(steps.processed_json.outputs.*, '\n')}}
