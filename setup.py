@@ -5,7 +5,7 @@ from __future__ import print_function
 
 import io
 from setuptools import setup, find_packages
-# Read the README
+
 with io.open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
