@@ -2,11 +2,3 @@
 requires = ["setuptools>=40.8.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-license-files = ["LICENSE"]
-
-[project]
-name = "py2dataclasses"
-dynamic = ["version"]
-license = "MIT"
-license-files = ["LICEN[CS]E*"]
