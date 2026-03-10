@@ -25,9 +25,9 @@ def remove_fake_dataclasses_from_path():
     # __file__ is in `tests/`, so we're going one level above and removing both it and src
 
     p = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    sys.path.remove(p)
+    sys.path.remove(p) if p in sys.path else None
     p = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
-    sys.path.remove(p)
+    sys.path.remove(p) if p in sys.path else None
     pass
 
 def get_patchers(runtime, lib, tests):
@@ -37,8 +37,8 @@ def get_patchers(runtime, lib, tests):
         #patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
         patch_sys, patch_mod = lambda: remove_fake_dataclasses_from_path(), lambda mod: mod
     elif runtime == "py3" and lib == STANDARD and tests == BACKPORTED:
-        from . import _fixtures_compat_stdlib_to_backport
-        patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,
+        from . import _fixtures_compat_backport_to_stdlib
+        patch_sys, patch_mod = _fixtures_compat_backport_to_stdlib.patch_sys,_fixtures_compat_backport_to_stdlib.patch_module,
     elif runtime == "py3" and lib == BACKPORTED and tests == STANDARD:
         from . import _fixtures_compat_stdlib_to_backport
         patch_sys, patch_mod = _fixtures_compat_stdlib_to_backport.patch_sys,_fixtures_compat_stdlib_to_backport.patch_module,

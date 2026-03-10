@@ -26,8 +26,8 @@ except ImportError:
 from collections import OrderedDict, deque
 
 
-path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
-sys.path.append(path)
+#path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..","..", "src"))
+#sys.path.append(path)
 from dataclasses import fields, field, Field, dataclass, is_dataclass, replace, make_dataclass, asdict, \
     astuple, FrozenInstanceError, MISSING, InitVar
 import dataclasses
@@ -3058,7 +3058,7 @@ class TestInitAnnotate(unittest.TestCase):
 
 class TestRepr(unittest.TestCase):
     def test_repr(self):
-        print("aaa")
+
         @dataclass
         class B(object):
             x = field(int)

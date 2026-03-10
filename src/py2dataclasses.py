@@ -1,1 +1,1 @@
-from _py2dataclasses import *
+from ._py2dataclasses import *
