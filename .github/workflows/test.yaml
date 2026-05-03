@@ -19,10 +19,20 @@ jobs:
             container:
               image: coatldev/six:latest
             tox-env: "test_ported_on_portedlib_py27"
+          - python-version: "2.7"
+            os: ubuntu-latest
+            suffix: "2"
+            container:
+              image: coatldev/six:latest
+            tox-env: "test_load_py27"
           - python-version: "3.14"
             os: ubuntu-latest
             container: python:3.14
             tox-env: "test_native_on_portedlib"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            container: python:3.14
+            tox-env: "test_load_py314"
           - python-version: "3.14"
             os: ubuntu-latest
             container: python:3.14
@@ -39,6 +49,8 @@ jobs:
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v5
+      - name: Trust checkout directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Setup Python
         if: matrix.python-version != '2.7'
         uses: actions/setup-python@v5
@@ -54,21 +66,29 @@ jobs:
       - name: Run tox
         run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
         continue-on-error: true
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && hashFiles(format('{0}-coverage.xml', matrix.tox-env)) != '' }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ matrix.tox-env }}.xml
+          files: ${{ matrix.tox-env }}-coverage.xml
           name: ${{ matrix.tox-env }}
           flags: ${{ matrix.tox-env }}
           slug: nev3rfail/py2dataclasses
       - name: Process test XML
         id: processed_json
         run: |
-          echo "json<<EOF" >> $GITHUB_OUTPUT
-          python${{ matrix.suffix }} -m tests._xmlprocessor < ${{ matrix.tox-env }}.xml >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          if [ -f "${{ matrix.tox-env }}.xml" ]; then
+            python${{ matrix.suffix }} -m tests._xmlprocessor < "${{ matrix.tox-env }}.xml" > processed.json
+          else
+            printf '{"summary":{"tests":0,"passed":0,"failures":0,"errors":1,"skipped":0},"testsuites":[]}\n' > processed.json
+          fi
+
+          {
+            echo "json<<EOF"
+            cat processed.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
 #      - name: Update gist
 #        uses: gorgbus/gist-actions@main
