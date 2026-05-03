@@ -11,7 +11,10 @@ import sys
 sys.path.insert(0, "/path/to/py2dataclasses/src")
 
 from dataclasses import dataclass, field, fields, asdict, astuple, replace, make_dataclass, is_dataclass
-from dataclasses import InitVar, ClassVar, KW_ONLY, MISSING, FrozenInstanceError
+from dataclasses import InitVar, KW_ONLY, MISSING, FrozenInstanceError
+from dataclasses import load, loads, dump, dumps
+from dataclasses import validate, validates, ValidationError
+from typing import ClassVar
 ```
 
 ## Quick Start
@@ -446,6 +449,11 @@ v = Vector(1.0, 2.0, 3.0)
 
 ## Serialization / Deserialization
 
+`load()` / `dump()` are the dictionary conversion helpers. `loads()` / `dumps()`
+reuse the same layer around JSON parsing/serialization by default. Pass
+`serializer=` to use another serializer object or module with `loads()` and
+`dumps()` functions.
+
 ### `load(cls, data)` — dict to dataclass
 
 ```python
@@ -483,7 +491,25 @@ load(User, {"name": "Alice", "age": 30, "extra": 1}, strict=True)
 # raises TypeError: Unknown fields for User: extra
 ```
 
-### `loads(cls, json_string)` — JSON string to dataclass
+Parameterized generic dataclasses are supported through the module-level
+helpers:
+
+```python
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
+
+@dataclass
+class Box(Generic[T]):
+    value = field(T)
+
+box = load(Box[int], {"value": 42})
+
+# Generated class methods on unresolved generic classes need explicit type_vars.
+box = Box.load({"value": 42}, type_vars={T: int})
+```
+
+### `loads(cls, payload, ..., serializer=None)` — serialized data to dataclass
 
 ```python
 from dataclasses import loads
@@ -502,7 +528,7 @@ d = dump(user)
 assert d == {"name": "Alice", "age": 30}
 ```
 
-### `dumps(instance)` — dataclass to JSON string
+### `dumps(instance, ..., serializer=None)` — dataclass to serialized data
 
 ```python
 from dataclasses import dumps
@@ -511,7 +537,19 @@ s = dumps(User("Alice", 30))
 # '{"name": "Alice", "age": 30}'
 ```
 
-### `validate(cls, data)` / `validates(cls, json_string)` — validation without instantiation
+Pass custom serializers by keyword. Serializer-specific keyword arguments are
+forwarded to the selected serializer:
+
+```python
+import msgpack
+from dataclasses import dumps, loads
+
+payload = dumps(User("Alice", 30), serializer=msgpack, use_bin_type=True)
+user = loads(User, payload, serializer=msgpack, raw=False)
+assert user.name == "Alice"
+```
+
+### `validate(cls, data)` / `validates(cls, payload)` — validation without instantiation
 
 ```python
 from dataclasses import validate, validates
@@ -525,6 +563,44 @@ validate(User, {"name": "Alice"})
 # raises ValueError: Missing required field 'age' for User
 
 validates(User, '{"name": "Alice", "age": 30}')  # returns True
+```
+
+`validates()` also accepts `serializer=` and forwards serializer-specific
+keyword arguments:
+
+```python
+validates(User, payload, serializer=msgpack, raw=False)  # returns True
+```
+
+By default validation stops at the first problem. Use `collect_errors=True` to
+raise one `ValidationError` with every validation issue found:
+
+```python
+from dataclasses import ValidationError
+
+bad_data = {
+    "name": 123,
+    "age": "bad",
+    "extra": True,
+}
+
+try:
+    validate(User, bad_data, strict=True, collect_errors=True)
+except ValidationError as exc:
+    for issue in exc.errors:
+        print("{0} {1}".format(issue.path, issue.message))
+
+# name expected str, got int (value: 123)
+# age expected int, got str (value: 'bad')
+# extra unknown field for User
+```
+
+The same option is available on `load()`, `loads()`, `validate()`,
+`validates()`, and the generated class methods:
+
+```python
+User.load(bad_data, strict=True, collect_errors=True)
+User.loads('{"name": 123, "age": "bad"}', collect_errors=True)
 ```
 
 ## Python 2.7 Limitations

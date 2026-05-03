@@ -67,6 +67,17 @@ assert is_dataclass(person)
 
 More examples [here](PYTHON2_USAGE.md).
 
+`loads()` / `dumps()` use `json` by default and can use any serializer module
+with `loads()` / `dumps()` functions:
+
+```python
+import msgpack
+from dataclasses import dumps, loads
+
+payload = dumps(Point(3, 4), serializer=msgpack, use_bin_type=True)
+point = loads(Point, payload, serializer=msgpack, raw=False)
+```
+
 
 ## Development
 
@@ -102,5 +113,3 @@ More examples [here](PYTHON2_USAGE.md).
 
 ### ⚠ WARNING
 * Please, do not use Python 2.7 in 2026
-
-
