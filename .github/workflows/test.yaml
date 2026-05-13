@@ -64,6 +64,7 @@ jobs:
       - name: Install tox and coverage
         run: python${{ matrix.suffix }} -m pip install tox coverage
       - name: Run tox
+        id: tox
         run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
         continue-on-error: true
       - name: Upload coverage to Codecov
@@ -78,11 +79,11 @@ jobs:
       - name: Process test XML
         id: processed_json
         run: |
-          if [ -f "${{ matrix.tox-env }}.xml" ]; then
-            python${{ matrix.suffix }} -m tests._xmlprocessor < "${{ matrix.tox-env }}.xml" > processed.json
-          else
-            printf '{"summary":{"tests":0,"passed":0,"failures":0,"errors":1,"skipped":0},"testsuites":[]}\n' > processed.json
+          if [ ! -f "${{ matrix.tox-env }}.xml" ]; then
+            echo "::error::Missing test XML for ${{ matrix.tox-env }}"
+            exit 1
           fi
+          python${{ matrix.suffix }} -m tests._xmlprocessor < "${{ matrix.tox-env }}.xml" > processed.json
 
           {
             echo "json<<EOF"
