@@ -2346,7 +2346,7 @@ def _resolve_load_type(cls, tp, type_vars=None):
 
     resolved = _evaluate_load_annotation(cls, tp)
     if resolved is not tp:
-        return _resolve_load_type(cls, resolved, type_vars=None)
+        return _resolve_load_type(cls, resolved, type_vars=type_vars)
     tp = resolved
 
     origin = _get_type_origin(tp)

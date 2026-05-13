@@ -1275,6 +1275,58 @@ class TestTypeVars(unittest.TestCase):
         self.assertEqual([issue.path for issue in cm.exception.errors],
                          ['value'])
 
+    def test_future_annotations_preserve_type_vars(self):
+        if sys.version_info < (3,):
+            self.skipTest('future annotations are Python 3 only')
+
+        sentinel = object()
+        names = ('FutureLoadT', 'FutureBox', 'FutureListBox')
+        previous = dict((name, globals().get(name, sentinel)) for name in names)
+        try:
+            six.exec_(
+                'from __future__ import annotations\n'
+                'FutureLoadT = TypeVar("FutureLoadT")\n'
+                '@dataclass\n'
+                'class FutureBox(Generic[FutureLoadT]):\n'
+                '    value: FutureLoadT\n'
+                '@dataclass\n'
+                'class FutureListBox(Generic[FutureLoadT]):\n'
+                '    items: List[FutureLoadT]\n',
+                globals())
+            FutureBox = globals()['FutureBox']
+            FutureListBox = globals()['FutureListBox']
+            FutureT = globals()['FutureLoadT']
+
+            obj = load(FutureBox[int], {'value': 42})
+            explicit_obj = load(FutureBox, {'value': 7},
+                                type_vars={FutureT: int})
+            list_obj = load(FutureListBox[int], {'items': [1, 2]})
+
+            self.assertEqual(obj.value, 42)
+            self.assertEqual(explicit_obj.value, 7)
+            self.assertEqual(list_obj.items, [1, 2])
+
+            with self.assertRaises(TypeError):
+                load(FutureBox[int], {'value': 'bad'})
+
+            with self.assertRaises(TypeError):
+                load(FutureBox, {'value': 'bad'}, type_vars={FutureT: int})
+
+            with self.assertRaises(TypeError):
+                load(FutureListBox[int], {'items': [1, 'bad']})
+
+            with self.assertRaises(ValidationError) as cm:
+                validate(FutureListBox[int], {'items': [1, 'bad']},
+                         collect_errors=True)
+            self.assertEqual([issue.path for issue in cm.exception.errors],
+                             ['items[1]'])
+        finally:
+            for name, value in previous.items():
+                if value is sentinel:
+                    globals().pop(name, None)
+                else:
+                    globals()[name] = value
+
     def test_typevar_resolved_optional(self):
         obj = load(Box, {'value': None}, type_vars={T: Optional[int]})
         self.assertIsNone(obj.value)
