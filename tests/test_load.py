@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 import sys
 import json
+import six
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 if sys.version_info >= (3,):
@@ -177,6 +178,11 @@ class WithFloat(object):
 @dataclass
 class WithBool(object):
     flag = field(bool)
+
+
+@dataclass
+class WithStringType(object):
+    value = field('int')
 
 
 @dataclass
@@ -534,6 +540,45 @@ class TestValidation(unittest.TestCase):
         self.assertEqual(obj.data, 'string')
         obj = load(WithAny, {'data': [1, 2, 3]})
         self.assertEqual(obj.data, [1, 2, 3])
+
+    def test_string_field_type_is_resolved(self):
+        obj = load(WithStringType, {'value': 42})
+        self.assertEqual(obj.value, 42)
+
+        with self.assertRaises(TypeError):
+            load(WithStringType, {'value': 'bad'})
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(WithStringType, {'value': 'bad'}, collect_errors=True)
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['value'])
+
+    def test_future_annotations_are_resolved(self):
+        if sys.version_info < (3,):
+            self.skipTest('future annotations are Python 3 only')
+
+        namespace = {
+            '__name__': __name__,
+            'dataclass': dataclass,
+        }
+        six.exec_(
+            'from __future__ import annotations\n'
+            '@dataclass\n'
+            'class FutureAnnotated(object):\n'
+            '    value: int\n',
+            namespace)
+        FutureAnnotated = namespace['FutureAnnotated']
+
+        obj = load(FutureAnnotated, {'value': 42})
+        self.assertEqual(obj.value, 42)
+
+        with self.assertRaises(TypeError):
+            load(FutureAnnotated, {'value': 'bad'})
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(FutureAnnotated, {'value': 'bad'}, collect_errors=True)
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['value'])
 
 
 class TestCollectErrors(unittest.TestCase):
@@ -1301,7 +1346,13 @@ class TestTypeVars(unittest.TestCase):
             Box.load({'value': 42})
 
         with self.assertRaises(TypeError):
+            Box.load({'value': 42}, type_vars={})
+
+        with self.assertRaises(TypeError):
             Box.loads('{"value": 42}')
+
+        with self.assertRaises(TypeError):
+            Box.loads('{"value": 42}', type_vars={})
 
         with self.assertRaises(TypeError):
             Box[int].load({'value': 42})
@@ -1573,6 +1624,9 @@ class TestDump(unittest.TestCase):
         original_dump = impl.dump
         calls = []
 
+        def marker_factory(pairs):
+            return dict(pairs)
+
         def fake_dump(obj, dict_factory=impl._default_dict_factory):
             calls.append((obj, dict_factory))
             return {'sentinel': 1}
@@ -1583,10 +1637,18 @@ class TestDump(unittest.TestCase):
             self.assertEqual(p.dump(), {'sentinel': 1})
             self.assertEqual(json.loads(dumps(p)), {'sentinel': 1})
             self.assertEqual(json.loads(p.dumps()), {'sentinel': 1})
+            self.assertEqual(
+                json.loads(dumps(p, dict_factory=marker_factory)),
+                {'sentinel': 1})
+            self.assertEqual(
+                json.loads(p.dumps(dict_factory=marker_factory)),
+                {'sentinel': 1})
         finally:
             impl.dump = original_dump
 
-        self.assertEqual([call[0] for call in calls], [p, p, p])
+        self.assertEqual([call[0] for call in calls], [p, p, p, p, p])
+        self.assertIs(calls[3][1], marker_factory)
+        self.assertIs(calls[4][1], marker_factory)
 
     def test_dumps_simple(self):
         p = Point(1, 2)
@@ -1683,6 +1745,39 @@ class TestDump(unittest.TestCase):
             'dump': 7,
             'dumps': 'to-json',
         })
+
+    def test_inherited_user_methods_are_not_overridden(self):
+        @dataclass
+        class UserMethodBase(object):
+            x = field(int)
+
+            @classmethod
+            def load(cls, data):
+                return 'custom-load:{0}'.format(cls.__name__)
+
+            @classmethod
+            def loads(cls, payload):
+                return 'custom-loads:{0}'.format(cls.__name__)
+
+            def dump(self):
+                return {'custom': self.x}
+
+            def dumps(self):
+                return 'custom-dumps:{0}'.format(self.x)
+
+        @dataclass
+        class UserMethodChild(UserMethodBase):
+            y = field(int)
+
+        self.assertEqual(UserMethodBase.load({}),
+                         'custom-load:UserMethodBase')
+        self.assertEqual(UserMethodChild.load({}),
+                         'custom-load:UserMethodChild')
+        self.assertEqual(UserMethodChild.loads('{}'),
+                         'custom-loads:UserMethodChild')
+        obj = UserMethodChild(1, 2)
+        self.assertEqual(obj.dump(), {'custom': 1})
+        self.assertEqual(obj.dumps(), 'custom-dumps:1')
 
 
 # ---------------------------------------------------------------------------

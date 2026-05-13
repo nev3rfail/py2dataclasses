@@ -1045,11 +1045,20 @@ class _GeneratedDataclassMethod(object):
         return self.descriptor.__get__(obj, cls)
 
 
+def _can_add_generated_method(cls, name, field_names):
+    if name in field_names:
+        return False
+    for base in cls.__mro__:
+        if name in base.__dict__:
+            return False
+    return True
+
+
 def _check_generated_load_type_vars(cls, type_vars):
     # Python 3 typing aliases proxy classmethod access to the origin class, so
     # Box[int].load(...) arrives here as Box.load(...). Avoid silently accepting
     # unresolved TypeVars; use load(Box[int], data) or pass type_vars explicitly.
-    if type_vars is None and (
+    if not type_vars and (
             getattr(cls, '__parameters__', ()) or
             getattr(cls, '__origin__', None) is not None):
         raise TypeError(
@@ -1307,7 +1316,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # not collide with user fields. Module-level functions always remain
     # available for dataclasses with fields named load/dump/etc.
     field_names = set(fields.keys())
-    if 'load' not in field_names:
+    if _can_add_generated_method(cls, 'load', field_names):
         def _cls_load(klass, data, strict=False, type_vars=None, collect_errors=False):
             _check_generated_load_type_vars(klass, type_vars)
             return load(klass, data, strict=strict, type_vars=type_vars,
@@ -1318,7 +1327,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             cls, 'load',
             _GeneratedDataclassMethod('load', classmethod(_cls_load)))
 
-    if 'loads' not in field_names:
+    if _can_add_generated_method(cls, 'loads', field_names):
         def _cls_loads(klass, payload, strict=False, type_vars=None,
                        collect_errors=False, serializer=None,
                        **serializer_kwargs):
@@ -1332,7 +1341,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             cls, 'loads',
             _GeneratedDataclassMethod('loads', classmethod(_cls_loads)))
 
-    if 'dump' not in field_names:
+    if _can_add_generated_method(cls, 'dump', field_names):
         def _inst_dump(self, dict_factory=_default_dict_factory):
             return dump(self, dict_factory=dict_factory)
         _inst_dump.__name__ = 'dump'
@@ -1341,7 +1350,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             cls, 'dump',
             _GeneratedDataclassMethod('dump', _inst_dump))
 
-    if 'dumps' not in field_names:
+    if _can_add_generated_method(cls, 'dumps', field_names):
         def _inst_dumps(self, **serializer_kwargs):
             return dumps(self, **serializer_kwargs)
         _inst_dumps.__name__ = 'dumps'
@@ -2280,6 +2289,76 @@ def _dataclass_type_and_type_vars(expected_type, type_vars=None):
     return None, type_vars
 
 
+def _class_eval_namespace(cls):
+    module = sys.modules.get(getattr(cls, '__module__', None))
+    if module is not None:
+        globals_dict = dict(module.__dict__)
+    else:
+        globals_dict = {}
+        if isinstance(__builtins__, dict):
+            globals_dict.update(__builtins__)
+        else:
+            globals_dict.update(__builtins__.__dict__)
+    globals_dict.setdefault('typing', typing)
+
+    locals_dict = {}
+    try:
+        locals_dict.update(cls.__dict__)
+    except (AttributeError, TypeError):
+        pass
+    locals_dict.setdefault(getattr(cls, '__name__', ''), cls)
+    return globals_dict, locals_dict
+
+
+def _evaluate_load_annotation(cls, annotation):
+    if isinstance(annotation, str):
+        globals_dict, locals_dict = _class_eval_namespace(cls)
+        try:
+            return eval(annotation, globals_dict, locals_dict)
+        except (NameError, AttributeError, TypeError, SyntaxError):
+            return annotation
+
+    if hasattr(annotation, '__forward_arg__'):
+        return _evaluate_load_annotation(cls, annotation.__forward_arg__)
+
+    return annotation
+
+
+def _rebuild_generic_type(tp, origin, args):
+    if hasattr(tp, 'copy_with'):
+        try:
+            return tp.copy_with(tuple(args))
+        except TypeError:
+            pass
+    if origin is not None:
+        try:
+            if len(args) == 1:
+                return origin[args[0]]
+            return origin[tuple(args)]
+        except (AttributeError, TypeError):
+            pass
+    return tp
+
+
+def _resolve_load_type(cls, tp, type_vars=None):
+    if type_vars:
+        tp = _resolve_type(tp, type_vars)
+
+    resolved = _evaluate_load_annotation(cls, tp)
+    if resolved is not tp:
+        return _resolve_load_type(cls, resolved, type_vars=None)
+    tp = resolved
+
+    origin = _get_type_origin(tp)
+    args = _get_type_args(tp)
+    if args:
+        new_args = tuple(_resolve_load_type(cls, arg, type_vars=type_vars)
+                         for arg in args)
+        if new_args != args:
+            return _rebuild_generic_type(tp, origin, new_args)
+    return tp
+
+
 def _validate_and_convert(value, expected_type, field_name, path,
                           strict=False, type_vars=None, create_instance=True):
     """Validate that value matches expected_type and convert nested structures.
@@ -2710,16 +2789,16 @@ def _infer_type_vars(cls):
     return result
 
 
-def _field_type_for_load(f):
+def _field_type_for_load(cls, f, type_vars=None):
     # For InitVar fields, extract the inner type for validation
-    field_type = f.type
+    field_type = _resolve_load_type(cls, f.type, type_vars=type_vars)
     if f._field_type is _FIELD_INITVAR:
-        if isinstance(f.type, InitVar):
-            field_type = f.type.type
-        elif isinstance(f.type, type) and issubclass(f.type, InitVar):
+        if isinstance(field_type, InitVar):
+            field_type = field_type.type
+        elif isinstance(field_type, type) and issubclass(field_type, InitVar):
             # Older InitVar implementations stored the inner type on __parameters__.
-            field_type = getattr(f.type, '__parameters__', None) or f.type
-    return field_type
+            field_type = getattr(field_type, '__parameters__', None) or field_type
+    return _resolve_load_type(cls, field_type, type_vars=type_vars)
 
 
 def _load_inner(cls, data, path="", strict=False, type_vars=None,
@@ -2754,11 +2833,7 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
             continue
 
         known_keys.add(f.name)
-        field_type = _field_type_for_load(f)
-
-        # Resolve TypeVars if type_vars mapping is provided
-        if type_vars:
-            field_type = _resolve_type(field_type, type_vars)
+        field_type = _field_type_for_load(cls, f, type_vars=type_vars)
 
         if f.name in data:
             value = data[f.name]
@@ -2837,11 +2912,7 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
             continue
 
         known_keys.add(f.name)
-        field_type = _field_type_for_load(f)
-
-        # Resolve TypeVars if type_vars mapping is provided
-        if type_vars:
-            field_type = _resolve_type(field_type, type_vars)
+        field_type = _field_type_for_load(cls, f, type_vars=type_vars)
 
         if f.name in data:
             converted = _validate_and_convert_collect(
