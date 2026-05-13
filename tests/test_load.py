@@ -254,6 +254,27 @@ class GenericNested(Generic[T]):
 
 
 @dataclass
+class GenericAliasFields(Generic[T]):
+    box = field(Box[T])
+    boxes = field(List[Box[T]])
+    mapping = field(Dict[str, Box[T]])
+
+
+@dataclass
+class GenericOptionalUnion(Generic[T]):
+    maybe = field(Optional[T])
+    either = field(Union[T, str])
+
+
+@dataclass
+class StringGenericAnnotations(Generic[T]):
+    item = field('T')
+    maybe = field('Optional[T]')
+    box = field('Box[T]')
+    boxes = field('List[Box[T]]')
+
+
+@dataclass
 class WithParameterizedBox(object):
     box = field(Box[int])
 
@@ -290,6 +311,16 @@ class StrBox(TypedBox[str]):
     pass
 
 
+@dataclass
+class ListBoxWithOwn(TypedBox[List[T]], Generic[T]):
+    item = field(T)
+
+
+@dataclass
+class IntListBoxWithOwn(ListBoxWithOwn[int]):
+    pass
+
+
 V = TypeVar('V')
 
 
@@ -301,6 +332,16 @@ class TypedPair(Generic[T, V]):
 
 @dataclass
 class IntStrPair(TypedPair[int, str]):
+    pass
+
+
+@dataclass
+class SwappedPair(TypedPair[V, T], Generic[T, V]):
+    pass
+
+
+@dataclass
+class SwappedIntStrPair(SwappedPair[int, str]):
     pass
 
 
@@ -1486,6 +1527,86 @@ class TestTypeVars(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(GenericDict, {'mapping': {'a': 'bad'}}, type_vars={T: int})
 
+    def test_generic_alias_inside_generic_field(self):
+        data = {
+            'box': {'value': 1},
+            'boxes': [{'value': 2}, {'value': 3}],
+            'mapping': {'a': {'value': 4}},
+        }
+
+        obj = load(GenericAliasFields[int], data)
+
+        self.assertEqual(obj.box.value, 1)
+        self.assertEqual([box.value for box in obj.boxes], [2, 3])
+        self.assertEqual(obj.mapping['a'].value, 4)
+        self.assertIsInstance(obj.box, Box)
+        self.assertIsInstance(obj.boxes[0], Box)
+        self.assertIsInstance(obj.mapping['a'], Box)
+
+    def test_generic_alias_inside_generic_field_rejects(self):
+        data = {
+            'box': {'value': 'bad'},
+            'boxes': [{'value': 1}, {'value': 'bad'}],
+            'mapping': {'a': {'value': 'bad'}},
+        }
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(GenericAliasFields[int], data, collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['box.value', 'boxes[1].value',
+                          'mapping[a].value'])
+
+    def test_generic_optional_union_fields(self):
+        none_data = {'maybe': None, 'either': 1}
+        str_union_data = {'maybe': 2, 'either': 'ok'}
+
+        none_obj = load(GenericOptionalUnion[int], none_data)
+        str_union_obj = load(GenericOptionalUnion[int], str_union_data)
+
+        self.assertIsNone(none_obj.maybe)
+        self.assertEqual(none_obj.either, 1)
+        self.assertEqual(str_union_obj.maybe, 2)
+        self.assertEqual(str_union_obj.either, 'ok')
+
+    def test_generic_optional_union_fields_rejects(self):
+        data = {'maybe': 'bad', 'either': 1.5}
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(GenericOptionalUnion[int], data, collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['maybe', 'either'])
+
+    def test_string_generic_annotations_resolve(self):
+        data = {
+            'item': 1,
+            'maybe': None,
+            'box': {'value': 2},
+            'boxes': [{'value': 3}],
+        }
+
+        obj = load(StringGenericAnnotations[int], data)
+
+        self.assertEqual(obj.item, 1)
+        self.assertIsNone(obj.maybe)
+        self.assertEqual(obj.box.value, 2)
+        self.assertEqual(obj.boxes[0].value, 3)
+
+    def test_string_generic_annotations_reject(self):
+        data = {
+            'item': 'bad',
+            'maybe': 'bad',
+            'box': {'value': 'bad'},
+            'boxes': [{'value': 'bad'}],
+        }
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(StringGenericAnnotations[int], data, collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['item', 'maybe', 'box.value', 'boxes[0].value'])
+
     # --- T resolved to a dataclass ---
 
     def test_typevar_resolved_to_dataclass(self):
@@ -1645,6 +1766,49 @@ class TestGenericInheritance(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(StrBox, {'value': 42})
 
+    def test_inherited_generic_transform_accepts(self):
+        obj = load(IntListBoxWithOwn, {'value': [1, 2], 'item': 3})
+        alias_obj = load(ListBoxWithOwn[int], {'value': [4, 5], 'item': 6})
+
+        self.assertEqual(obj.value, [1, 2])
+        self.assertEqual(obj.item, 3)
+        self.assertEqual(alias_obj.value, [4, 5])
+        self.assertEqual(alias_obj.item, 6)
+
+    def test_inherited_generic_transform_with_explicit_type_vars(self):
+        obj = load(ListBoxWithOwn, {'value': [1, 2], 'item': 3},
+                   type_vars={T: int})
+
+        self.assertEqual(obj.value, [1, 2])
+        self.assertEqual(obj.item, 3)
+
+        with self.assertRaises(ValidationError) as cm:
+            validate(ListBoxWithOwn, {'value': [1, 'bad'], 'item': 'bad'},
+                     type_vars={T: int}, collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['value[1]', 'item'])
+
+    def test_inherited_generic_transform_rejects_base_field_element(self):
+        with self.assertRaises(TypeError) as cm:
+            load(IntListBoxWithOwn, {'value': [1, 'bad'], 'item': 3})
+
+        self.assertIn('value[1]', str(cm.exception))
+
+    def test_inherited_generic_transform_rejects_owner_field(self):
+        with self.assertRaises(TypeError) as cm:
+            load(IntListBoxWithOwn, {'value': [1, 2], 'item': 'bad'})
+
+        self.assertIn('item', str(cm.exception))
+
+    def test_inherited_generic_transform_collects_errors(self):
+        with self.assertRaises(ValidationError) as cm:
+            validate(IntListBoxWithOwn, {'value': [1, 'bad'], 'item': 'bad'},
+                     collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['value[1]', 'item'])
+
     # --- Two TypeVars: IntStrPair inherits TypedPair[int, str] ---
 
     def test_int_str_pair_accepts(self):
@@ -1659,6 +1823,74 @@ class TestGenericInheritance(unittest.TestCase):
     def test_int_str_pair_rejects_wrong_second(self):
         with self.assertRaises(TypeError):
             load(IntStrPair, {'first': 1, 'second': 99})
+
+    def test_inherited_generic_reordered_type_vars_accepts(self):
+        obj = load(SwappedIntStrPair, {'first': 'hello', 'second': 42})
+        alias_obj = load(SwappedPair[int, str],
+                         {'first': 'world', 'second': 7})
+
+        self.assertEqual(obj.first, 'hello')
+        self.assertEqual(obj.second, 42)
+        self.assertEqual(alias_obj.first, 'world')
+        self.assertEqual(alias_obj.second, 7)
+
+    def test_inherited_generic_reordered_type_vars_rejects(self):
+        with self.assertRaises(ValidationError) as cm:
+            validate(SwappedIntStrPair, {'first': 1, 'second': 'bad'},
+                     collect_errors=True)
+
+        self.assertEqual([issue.path for issue in cm.exception.errors],
+                         ['first', 'second'])
+
+    def test_future_annotations_inherited_generic_transform(self):
+        if sys.version_info < (3,):
+            self.skipTest('future annotations are Python 3 only')
+
+        sentinel = object()
+        names = ('FutureInheritedT', 'FutureInheritedBase',
+                 'FutureInheritedListBase', 'FutureInheritedIntList')
+        previous = dict((name, globals().get(name, sentinel)) for name in names)
+        try:
+            six.exec_(
+                'from __future__ import annotations\n'
+                'FutureInheritedT = TypeVar("FutureInheritedT")\n'
+                '@dataclass\n'
+                'class FutureInheritedBase(Generic[FutureInheritedT]):\n'
+                '    value: FutureInheritedT\n'
+                '@dataclass\n'
+                'class FutureInheritedListBase('
+                'FutureInheritedBase[List[FutureInheritedT]], '
+                'Generic[FutureInheritedT]):\n'
+                '    item: FutureInheritedT\n'
+                '@dataclass\n'
+                'class FutureInheritedIntList('
+                'FutureInheritedListBase[int]):\n'
+                '    pass\n',
+                globals())
+            FutureInheritedIntList = globals()['FutureInheritedIntList']
+
+            obj = load(FutureInheritedIntList, {
+                'value': [1, 2],
+                'item': 3,
+            })
+
+            self.assertEqual(obj.value, [1, 2])
+            self.assertEqual(obj.item, 3)
+
+            with self.assertRaises(ValidationError) as cm:
+                validate(FutureInheritedIntList, {
+                    'value': [1, 'bad'],
+                    'item': 'bad',
+                }, collect_errors=True)
+
+            self.assertEqual([issue.path for issue in cm.exception.errors],
+                             ['value[1]', 'item'])
+        finally:
+            for name, value in previous.items():
+                if value is sentinel:
+                    globals().pop(name, None)
+                else:
+                    globals()[name] = value
 
     # --- Generic container: IntContainer inherits TypedContainer[int] -> List[int] ---
 

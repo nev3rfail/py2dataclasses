@@ -2778,30 +2778,108 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
     return value
 
 
-def _infer_type_vars(cls):
-    """Infer TypeVar -> concrete type mappings from class hierarchy."""
-    result = {}
-    for base in getattr(cls, '__orig_bases__', ()):
-        origin = getattr(base, '__origin__', None)
-        args = getattr(base, '__args__', None)
-        if origin is not None and args:
-            params = getattr(origin, '__parameters__', ())
+def _field_owner(cls, field_obj):
+    for base in reversed(cls.__mro__[:-1]):
+        base_fields = getattr(base, _FIELDS, None)
+        if base_fields is not None and base_fields.get(field_obj.name) is field_obj:
+            return base
+    return cls
+
+
+def _typed_bases(cls):
+    orig_bases = list(getattr(cls, '__orig_bases__', ()) or ())
+    if not orig_bases:
+        return list(getattr(cls, '__bases__', ()) or ())
+
+    bases = list(orig_bases)
+    origins = set()
+    for base in orig_bases:
+        origin = _get_type_origin(base)
+        if origin is not None:
+            origins.add(origin)
+        elif isinstance(base, type):
+            origins.add(base)
+
+    for base in getattr(cls, '__bases__', ()):
+        if base not in origins:
+            bases.append(base)
+    return bases
+
+
+def _type_vars_for_base(cls, target, type_vars=None):
+    found, resolved = _type_vars_for_base_inner(
+        cls, target, type_vars or {}, set())
+    if found:
+        return resolved or None
+    return type_vars
+
+
+def _type_vars_for_base_inner(cls, target, type_vars, seen):
+    if cls is target:
+        return True, dict(type_vars)
+    if cls in seen:
+        return False, None
+    seen = set(seen)
+    seen.add(cls)
+
+    for base in _typed_bases(cls):
+        origin = _get_type_origin(base)
+        args = _get_type_args(base)
+        if origin is None:
+            if not isinstance(base, type):
+                continue
+            origin = base
+            args = ()
+        if not isinstance(origin, type):
+            continue
+
+        params = getattr(origin, '__parameters__', ()) or ()
+        next_type_vars = {}
+        if params and args:
             for param, arg in zip(params, args):
-                if isinstance(param, typing.TypeVar) and not isinstance(arg, typing.TypeVar):
-                    result[param] = arg
-    return result
+                if isinstance(param, typing.TypeVar):
+                    next_type_vars[param] = _resolve_load_type(
+                        cls, arg, type_vars=type_vars)
+
+        found, resolved = _type_vars_for_base_inner(
+            origin, target, next_type_vars, seen)
+        if found:
+            return True, resolved
+
+    return False, None
+
+
+def _field_type_vars_for_load(cls, owner, type_vars=None):
+    cls_params = getattr(cls, '__parameters__', ()) or ()
+    if type_vars and cls_params:
+        current_type_vars = {}
+        final_overrides = {}
+        for param, arg in type_vars.items():
+            if param in cls_params:
+                current_type_vars[param] = arg
+            else:
+                final_overrides[param] = arg
+    else:
+        current_type_vars = None
+        final_overrides = type_vars
+
+    field_type_vars = _type_vars_for_base(cls, owner, current_type_vars)
+    return _merge_type_vars(field_type_vars, final_overrides)
 
 
 def _field_type_for_load(cls, f, type_vars=None):
+    owner = _field_owner(cls, f)
+    field_type_vars = _field_type_vars_for_load(cls, owner, type_vars)
+
     # For InitVar fields, extract the inner type for validation
-    field_type = _resolve_load_type(cls, f.type, type_vars=type_vars)
+    field_type = _resolve_load_type(owner, f.type, type_vars=field_type_vars)
     if f._field_type is _FIELD_INITVAR:
         if isinstance(field_type, InitVar):
             field_type = field_type.type
         elif isinstance(field_type, type) and issubclass(field_type, InitVar):
             # Older InitVar implementations stored the inner type on __parameters__.
             field_type = getattr(field_type, '__parameters__', None) or field_type
-    return _resolve_load_type(cls, field_type, type_vars=type_vars)
+    return _resolve_load_type(owner, field_type, type_vars=field_type_vars)
 
 
 def _load_inner(cls, data, path="", strict=False, type_vars=None,
@@ -2811,10 +2889,6 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
         raise TypeError(
             "Expected dict for {0}, got {1}".format(
                 cls.__name__, type(data).__name__))
-
-    # Auto-infer TypeVar mappings from class hierarchy, merge with explicit type_vars
-    inferred = _infer_type_vars(cls)
-    type_vars = _merge_type_vars(inferred, type_vars)
 
     all_fields = getattr(cls, _FIELDS)
     kwargs = {}
@@ -2887,10 +2961,6 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
                 cls.__name__, type(data).__name__),
             dict, type(data).__name__, data)
         return None
-
-    # Auto-infer TypeVar mappings from class hierarchy, merge with explicit type_vars
-    inferred = _infer_type_vars(cls)
-    type_vars = _merge_type_vars(inferred, type_vars)
 
     all_fields = getattr(cls, _FIELDS)
     kwargs = {}
