@@ -901,8 +901,11 @@ def _frozen_get_del_attr(cls, fields, func_builder):
 
 
 def _is_classvar(a_type, typing):
-    return (a_type is typing.ClassVar or type(a_type) == type(typing.ClassVar)
-            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar))
+    return (a_type is typing.ClassVar
+            or (hasattr(typing, 'get_origin')
+                and typing.get_origin(a_type) is typing.ClassVar)
+            or (sys.version_info < (3,)
+                and type(a_type) == type(typing.ClassVar)))
 
 
 def _is_initvar(a_type, dataclasses):

@@ -1280,7 +1280,8 @@ class TestTypeVars(unittest.TestCase):
             self.skipTest('future annotations are Python 3 only')
 
         sentinel = object()
-        names = ('FutureLoadT', 'FutureBox', 'FutureListBox')
+        names = ('FutureLoadT', 'FutureBox', 'FutureListBox',
+                 'FutureOptionalBox')
         previous = dict((name, globals().get(name, sentinel)) for name in names)
         try:
             six.exec_(
@@ -1291,20 +1292,26 @@ class TestTypeVars(unittest.TestCase):
                 '    value: FutureLoadT\n'
                 '@dataclass\n'
                 'class FutureListBox(Generic[FutureLoadT]):\n'
-                '    items: List[FutureLoadT]\n',
+                '    items: List[FutureLoadT]\n'
+                '@dataclass\n'
+                'class FutureOptionalBox(Generic[FutureLoadT]):\n'
+                '    maybe: Optional[FutureLoadT]\n',
                 globals())
             FutureBox = globals()['FutureBox']
             FutureListBox = globals()['FutureListBox']
+            FutureOptionalBox = globals()['FutureOptionalBox']
             FutureT = globals()['FutureLoadT']
 
             obj = load(FutureBox[int], {'value': 42})
             explicit_obj = load(FutureBox, {'value': 7},
                                 type_vars={FutureT: int})
             list_obj = load(FutureListBox[int], {'items': [1, 2]})
+            optional_obj = load(FutureOptionalBox[int], {'maybe': None})
 
             self.assertEqual(obj.value, 42)
             self.assertEqual(explicit_obj.value, 7)
             self.assertEqual(list_obj.items, [1, 2])
+            self.assertIsNone(optional_obj.maybe)
 
             with self.assertRaises(TypeError):
                 load(FutureBox[int], {'value': 'bad'})
@@ -1315,11 +1322,118 @@ class TestTypeVars(unittest.TestCase):
             with self.assertRaises(TypeError):
                 load(FutureListBox[int], {'items': [1, 'bad']})
 
+            with self.assertRaises(TypeError):
+                load(FutureOptionalBox[int], {'maybe': 'bad'})
+
             with self.assertRaises(ValidationError) as cm:
-                validate(FutureListBox[int], {'items': [1, 'bad']},
+                validate(FutureOptionalBox[int], {'maybe': 'bad'},
                          collect_errors=True)
             self.assertEqual([issue.path for issue in cm.exception.errors],
-                             ['items[1]'])
+                             ['maybe'])
+        finally:
+            for name, value in previous.items():
+                if value is sentinel:
+                    globals().pop(name, None)
+                else:
+                    globals()[name] = value
+
+    def test_future_annotations_preserve_pep604_type_vars(self):
+        if sys.version_info < (3, 10):
+            self.skipTest('PEP 604 annotations require Python 3.10+')
+
+        sentinel = object()
+        names = ('FuturePipeT', 'FuturePipeBox')
+        previous = dict((name, globals().get(name, sentinel)) for name in names)
+        try:
+            six.exec_(
+                'from __future__ import annotations\n'
+                'FuturePipeT = TypeVar("FuturePipeT")\n'
+                '@dataclass\n'
+                'class FuturePipeBox(Generic[FuturePipeT]):\n'
+                '    maybe: FuturePipeT | None\n'
+                '    either: FuturePipeT | str\n',
+                globals())
+            FuturePipeBox = globals()['FuturePipeBox']
+
+            obj = load(FuturePipeBox[int], {'maybe': None, 'either': 42})
+            str_union_obj = load(
+                FuturePipeBox[int], {'maybe': 7, 'either': 'ok'})
+
+            self.assertIsNone(obj.maybe)
+            self.assertEqual(obj.either, 42)
+            self.assertEqual(str_union_obj.maybe, 7)
+            self.assertEqual(str_union_obj.either, 'ok')
+
+            with self.assertRaises(TypeError):
+                load(FuturePipeBox[int], {'maybe': 'bad', 'either': 42})
+
+            with self.assertRaises(TypeError):
+                load(FuturePipeBox[int], {'maybe': 1, 'either': 1.5})
+
+            with self.assertRaises(ValidationError) as cm:
+                validate(FuturePipeBox[int],
+                         {'maybe': 'bad', 'either': 1.5},
+                         collect_errors=True)
+            self.assertEqual([issue.path for issue in cm.exception.errors],
+                             ['maybe', 'either'])
+        finally:
+            for name, value in previous.items():
+                if value is sentinel:
+                    globals().pop(name, None)
+                else:
+                    globals()[name] = value
+
+    def test_future_annotations_preserve_nested_generic_type_vars(self):
+        if sys.version_info < (3,):
+            self.skipTest('future annotations are Python 3 only')
+
+        sentinel = object()
+        names = ('FutureNestedT', 'FutureInner', 'FutureOuter')
+        previous = dict((name, globals().get(name, sentinel)) for name in names)
+        try:
+            six.exec_(
+                'from __future__ import annotations\n'
+                'FutureNestedT = TypeVar("FutureNestedT")\n'
+                '@dataclass\n'
+                'class FutureInner(Generic[FutureNestedT]):\n'
+                '    value: FutureNestedT\n'
+                '@dataclass\n'
+                'class FutureOuter(Generic[FutureNestedT]):\n'
+                '    inner: FutureInner[FutureNestedT]\n'
+                '    mapping: Dict[str, FutureInner[FutureNestedT]]\n',
+                globals())
+            FutureInner = globals()['FutureInner']
+            FutureOuter = globals()['FutureOuter']
+
+            obj = load(FutureOuter[int], {
+                'inner': {'value': 1},
+                'mapping': {'a': {'value': 2}},
+            })
+
+            self.assertIsInstance(obj.inner, FutureInner)
+            self.assertIsInstance(obj.mapping['a'], FutureInner)
+            self.assertEqual(obj.inner.value, 1)
+            self.assertEqual(obj.mapping['a'].value, 2)
+
+            with self.assertRaises(TypeError):
+                load(FutureOuter[int], {
+                    'inner': {'value': 'bad'},
+                    'mapping': {'a': {'value': 2}},
+                })
+
+            with self.assertRaises(TypeError):
+                load(FutureOuter[int], {
+                    'inner': {'value': 1},
+                    'mapping': {'a': {'value': 'bad'}},
+                })
+
+            with self.assertRaises(ValidationError) as cm:
+                validate(FutureOuter[int], {
+                    'inner': {'value': 'bad'},
+                    'mapping': {'a': {'value': 'bad'}},
+                }, collect_errors=True)
+            self.assertEqual([issue.path for issue in cm.exception.errors],
+                             ['inner.value', 'mapping[a].value'])
         finally:
             for name, value in previous.items():
                 if value is sentinel:
