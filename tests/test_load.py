@@ -1,21 +1,14 @@
 """Tests for load/loads/dump/dumps functionality."""
 from __future__ import print_function
-import os
 import sys
 import json
 import six
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
-if sys.version_info >= (3,):
-    for _k in list(sys.modules.keys()):
-        if _k == 'dataclasses' or _k.startswith('dataclasses.'):
-            del sys.modules[_k]
-
 import unittest
 
 from dataclasses import (
-    dataclass, field, fields, asdict, load, loads, dump, dumps,
-    validate, validates, is_dataclass, InitVar, MISSING, ValidationError,
+    dataclass, field, load, loads, dump, dumps,
+    validate, validates, InitVar, ValidationError,
 )
 from typing import (
     ClassVar, List, Dict, Tuple, Optional, Any, TypeVar, Generic, Set, Union,
