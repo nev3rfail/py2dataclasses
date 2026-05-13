@@ -399,12 +399,15 @@ class TestLoadBasic(unittest.TestCase):
 
         try:
             impl.load = fake_load
-            self.assertEqual(loads(Point, '{"x": 3, "y": 4}'), Point(9, 10))
-            self.assertEqual(Point.load({'x': 5, 'y': 6}), Point(9, 10))
-            self.assertEqual(Point.loads('{"x": 7, "y": 8}'), Point(9, 10))
+            module_loads_result = loads(Point, '{"x": 3, "y": 4}')
+            generated_load_result = Point.load({'x': 5, 'y': 6})
+            generated_loads_result = Point.loads('{"x": 7, "y": 8}')
         finally:
             impl.load = original_load
 
+        self.assertEqual(module_loads_result, Point(9, 10))
+        self.assertEqual(generated_load_result, Point(9, 10))
+        self.assertEqual(generated_loads_result, Point(9, 10))
         self.assertEqual([call[1] for call in calls], [
             {'x': 3, 'y': 4},
             {'x': 5, 'y': 6},
@@ -423,7 +426,9 @@ class TestLoadBasic(unittest.TestCase):
 
     def test_loads_accepts_custom_serializer(self):
         payload = _BytesSerializer.dumps({'x': 10, 'y': 20})
+
         p = loads(Point, payload, serializer=_BytesSerializer, raw=False)
+
         self.assertEqual(p, Point(10, 20))
         self.assertEqual(_BytesSerializer.load_kwargs, {'raw': False})
 
@@ -535,14 +540,18 @@ class TestValidation(unittest.TestCase):
         self.assertEqual(obj.data, [1, 2, 3])
 
     def test_string_field_type_is_resolved(self):
-        obj = load(WithStringType, {'value': 42})
+        valid_data = {'value': 42}
+        invalid_data = {'value': 'bad'}
+
+        obj = load(WithStringType, valid_data)
+
         self.assertEqual(obj.value, 42)
 
         with self.assertRaises(TypeError):
-            load(WithStringType, {'value': 'bad'})
+            load(WithStringType, invalid_data)
 
         with self.assertRaises(ValidationError) as cm:
-            validate(WithStringType, {'value': 'bad'}, collect_errors=True)
+            validate(WithStringType, invalid_data, collect_errors=True)
         self.assertEqual([issue.path for issue in cm.exception.errors],
                          ['value'])
 
@@ -561,15 +570,18 @@ class TestValidation(unittest.TestCase):
             '    value: int\n',
             namespace)
         FutureAnnotated = namespace['FutureAnnotated']
+        valid_data = {'value': 42}
+        invalid_data = {'value': 'bad'}
 
-        obj = load(FutureAnnotated, {'value': 42})
+        obj = load(FutureAnnotated, valid_data)
+
         self.assertEqual(obj.value, 42)
 
         with self.assertRaises(TypeError):
-            load(FutureAnnotated, {'value': 'bad'})
+            load(FutureAnnotated, invalid_data)
 
         with self.assertRaises(ValidationError) as cm:
-            validate(FutureAnnotated, {'value': 'bad'}, collect_errors=True)
+            validate(FutureAnnotated, invalid_data, collect_errors=True)
         self.assertEqual([issue.path for issue in cm.exception.errors],
                          ['value'])
 
@@ -588,18 +600,22 @@ class TestCollectErrors(unittest.TestCase):
         self.fail('Expected ValidationError')
 
     def test_load_collects_multiple_flat_errors(self):
+        data = {'name': 123, 'age': 'bad', 'extra': True}
+
         exc = self.assertValidationPaths(
-            lambda: load(User, {'name': 123, 'age': 'bad', 'extra': True},
-                         strict=True, collect_errors=True),
+            lambda: load(User, data, strict=True, collect_errors=True),
             ['name', 'age', 'extra'])
+
         self.assertEqual(exc.errors[0].path, 'name')
         self.assertIn('expected str', exc.errors[0].message)
 
     def test_validate_collects_missing_type_and_unknown_errors(self):
+        data = {'x': 'bad', 'z': 3}
+
         exc = self.assertValidationPaths(
-            lambda: validate(Point, {'x': 'bad', 'z': 3},
-                             strict=True, collect_errors=True),
+            lambda: validate(Point, data, strict=True, collect_errors=True),
             ['x', 'y', 'z'])
+
         messages = dict((issue.path, issue.message) for issue in exc.errors)
         self.assertIn('expected int', messages['x'])
         self.assertIn('missing required field', messages['y'])
@@ -613,6 +629,7 @@ class TestCollectErrors(unittest.TestCase):
                 {'name': 99, 'address': 'not-an-address'},
             ],
         }
+
         self.assertValidationPaths(
             lambda: load(DeeplyNested, data, collect_errors=True),
             [
@@ -624,102 +641,138 @@ class TestCollectErrors(unittest.TestCase):
             ])
 
     def test_collect_errors_nested_strict_paths(self):
+        data = {
+            'name': 'John',
+            'address': {
+                'city': 'NYC',
+                'zip_code': '10001',
+                'extra': True,
+            },
+        }
+
         self.assertValidationPaths(
-            lambda: load(UserWithAddress,
-                         {'name': 'John',
-                          'address': {'city': 'NYC', 'zip_code': '10001',
-                                      'extra': True}},
-                         strict=True, collect_errors=True),
+            lambda: load(UserWithAddress, data, strict=True,
+                         collect_errors=True),
             ['address.extra'])
 
     def test_collect_errors_nested_type_vars(self):
+        data = {'name': 'nested', 'box': {'value': 'bad'}}
+
         self.assertValidationPaths(
-            lambda: load(GenericNested,
-                         {'name': 'nested', 'box': {'value': 'bad'}},
+            lambda: load(GenericNested, data,
                          type_vars={T: int}, collect_errors=True),
             ['box.value'])
 
     def test_loads_and_validates_collect_errors(self):
-        exc = self.assertValidationPaths(
-            lambda: User.loads('{"name": 123, "age": "bad"}',
-                               collect_errors=True),
-            ['name', 'age'])
-        self.assertIn(exc.errors[1].actual, ('str', 'unicode'))
+        invalid_payload = '{"name": 123, "age": "bad"}'
+        valid_payload = '{"name": "Alice", "age": 30}'
 
-        self.assertTrue(validates(User, '{"name": "Alice", "age": 30}',
-                                  collect_errors=True))
+        exc = self.assertValidationPaths(
+            lambda: User.loads(invalid_payload, collect_errors=True),
+            ['name', 'age'])
+        validates_result = validates(User, valid_payload, collect_errors=True)
+
+        self.assertIn(exc.errors[1].actual, ('str', 'unicode'))
+        self.assertTrue(validates_result)
 
     def test_validates_accepts_custom_serializer(self):
         payload = _BytesSerializer.dumps({'name': 'Alice', 'age': 30})
-        self.assertTrue(validates(User, payload, serializer=_BytesSerializer,
-                                  raw=False))
+
+        result = validates(User, payload, serializer=_BytesSerializer,
+                           raw=False)
+
+        self.assertTrue(result)
         self.assertEqual(_BytesSerializer.load_kwargs, {'raw': False})
 
     def test_collect_errors_success_still_returns_object(self):
         obj = load(Point, {'x': 1, 'y': 2}, collect_errors=True)
+
         self.assertEqual(obj, Point(1, 2))
 
-    def test_collect_errors_typevar_edges(self):
-        self.assertEqual(
-            load(ConstrainedBox, {'value': 'ok'}, type_vars={CT: CT},
-                 collect_errors=True).value,
-            'ok')
+    def test_collect_errors_accepts_self_mapped_constrained_typevar(self):
+        obj = load(ConstrainedBox, {'value': 'ok'}, type_vars={CT: CT},
+                   collect_errors=True)
 
+        self.assertEqual(obj.value, 'ok')
+
+    def test_collect_errors_unbound_typevar_accepts_anything(self):
         marker = object()
-        self.assertIs(load(Box, {'value': marker}, collect_errors=True).value,
-                      marker)
 
-        self.assertEqual(
-            load(WithOptional, {'name': 'Alice', 'nickname': 'Al'},
-                 collect_errors=True).nickname,
-            'Al')
+        obj = load(Box, {'value': marker}, collect_errors=True)
 
+        self.assertIs(obj.value, marker)
+
+    def test_collect_errors_optional_value(self):
+        obj = load(WithOptional, {'name': 'Alice', 'nickname': 'Al'},
+                   collect_errors=True)
+
+        self.assertEqual(obj.nickname, 'Al')
+
+    def test_collect_errors_self_mapped_constraint_path(self):
         with self.assertRaises(ValidationError) as cm:
             load(ConstrainedBox, {'value': 3.14}, type_vars={CT: CT},
                  collect_errors=True)
+
         self.assertEqual([issue.path for issue in cm.exception.errors],
                          ['value'])
 
+    def test_collect_errors_bound_path(self):
         with self.assertRaises(ValidationError) as bound_cm:
             load(BoundIntBox, {'value': 'bad'}, collect_errors=True)
+
         self.assertEqual([issue.path for issue in bound_cm.exception.errors],
                          ['value'])
 
+    def test_collect_errors_none_path(self):
         with self.assertRaises(ValidationError) as none_cm:
             load(Point, {'x': None, 'y': 2}, collect_errors=True)
+
         self.assertEqual([issue.path for issue in none_cm.exception.errors],
                          ['x'])
 
-    def test_collect_errors_top_level_and_field_controls(self):
+    def test_collect_errors_top_level_non_mapping_path(self):
         with self.assertRaises(ValidationError) as top_level:
             validate(Point, [], collect_errors=True)
+
         self.assertEqual(top_level.exception.errors[0].path, '')
 
-        self.assertTrue(validate(WithClassVar, {'x': 1}, collect_errors=True))
+    def test_collect_errors_ignores_classvar(self):
+        result = validate(WithClassVar, {'x': 1}, collect_errors=True)
+
+        self.assertTrue(result)
+
+    def test_collect_errors_applies_defaults(self):
         obj = load(WithDefaults, {'name': 'defaulted'},
                    collect_errors=True)
+
         self.assertEqual(obj.score, 0)
         self.assertEqual(obj.tags, [])
 
+    def test_collect_errors_init_false_strict_path(self):
         with self.assertRaises(ValidationError) as init_false:
             load(WithInitFalse, {'x': 1, 'y': 2}, strict=True,
                  collect_errors=True)
+
         self.assertEqual([issue.path for issue in init_false.exception.errors],
                          ['y'])
 
+    def test_validate_rejects_non_dataclass(self):
         with self.assertRaises(TypeError):
             validate(int, {'x': 1})
 
     def test_collect_errors_accepts_existing_nested_dataclass(self):
         address = Address('NYC', '10001')
+
         obj = load(UserWithAddress,
                    {'name': 'Bob', 'address': address},
                    collect_errors=True)
+
         self.assertIs(obj.address, address)
 
     def test_collect_errors_accepts_top_level_non_instance_validation(self):
-        self.assertTrue(validate(Point, {'x': 1, 'y': 2},
-                                 collect_errors=True))
+        result = validate(Point, {'x': 1, 'y': 2}, collect_errors=True)
+
+        self.assertTrue(result)
 
     def test_default_validation_remains_fail_fast(self):
         with self.assertRaises(TypeError):
@@ -739,11 +792,17 @@ class TestCollectErrors(unittest.TestCase):
         class Wrapper(object):
             child = field(SideEffect)
 
-        self.assertTrue(validate(Wrapper, {'child': {'x': 1}}))
-        self.assertTrue(validate(Wrapper, {'child': {'x': 2}},
-                                 collect_errors=True))
+        validate_result = validate(Wrapper, {'child': {'x': 1}})
+        collect_result = validate(Wrapper, {'child': {'x': 2}},
+                                  collect_errors=True)
+
+        self.assertTrue(validate_result)
+        self.assertTrue(collect_result)
         self.assertEqual(_validation_side_effects, [])
-        self.assertEqual(load(Wrapper, {'child': {'x': 3}}).child.x, 3)
+
+        loaded = load(Wrapper, {'child': {'x': 3}})
+
+        self.assertEqual(loaded.child.x, 3)
         self.assertEqual(_validation_side_effects, [3])
 
     def test_validate_does_not_call_default_factory(self):
@@ -754,10 +813,16 @@ class TestCollectErrors(unittest.TestCase):
             x = field(int)
             y = field(int, default_factory=_validation_default_factory)
 
-        self.assertTrue(validate(WithFactory, {'x': 1}))
-        self.assertTrue(validate(WithFactory, {'x': 2}, collect_errors=True))
+        validate_result = validate(WithFactory, {'x': 1})
+        collect_result = validate(WithFactory, {'x': 2}, collect_errors=True)
+
+        self.assertTrue(validate_result)
+        self.assertTrue(collect_result)
         self.assertEqual(_validation_default_factory_calls, [])
-        self.assertEqual(load(WithFactory, {'x': 3}).y, 1)
+
+        loaded = load(WithFactory, {'x': 3})
+
+        self.assertEqual(loaded.y, 1)
         self.assertEqual(_validation_default_factory_calls, ['factory'])
 
 
@@ -856,14 +921,13 @@ class TestGenerics(unittest.TestCase):
             load(WithVarTuple, {'values': [1, 'bad', 3]})
 
     def test_variadic_tuple_collects_element_path(self):
-        try:
+        with self.assertRaises(ValidationError) as cm:
             validate(WithVarTuple, {'values': [1, 'bad', False]},
                      collect_errors=True)
-            self.fail('Expected ValidationError')
-        except ValidationError as exc:
-            self.assertEqual(
-                [issue.path for issue in exc.errors],
-                ['values[1]', 'values[2]'])
+
+        self.assertEqual(
+            [issue.path for issue in cm.exception.errors],
+            ['values[1]', 'values[2]'])
 
     def test_list_of_dataclass(self):
         data = {'users': [{'name': 'Alice', 'age': 30}, {'name': 'Bob', 'age': 25}]}
@@ -973,27 +1037,38 @@ class TestNestedCollections(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(WithListOfOptional, {'values': [1, 'bad', 3]})
 
-    def test_set_generic(self):
+    def test_set_generic_accepts_sequence(self):
         obj = load(WithSet, {'values': [1, 2, 2]})
+
         self.assertEqual(obj.values, set([1, 2]))
 
+    def test_set_generic_rejects_non_sequence(self):
         with self.assertRaises(TypeError):
             load(WithSet, {'values': 'not-a-set'})
 
+    def test_set_generic_rejects_wrong_element(self):
         with self.assertRaises(TypeError):
             load(WithSet, {'values': [1, 'bad']})
 
-    def test_union_generic(self):
-        self.assertEqual(load(WithUnion, {'value': 42}).value, 42)
-        self.assertEqual(load(WithUnion, {'value': 'forty-two'}).value,
-                         'forty-two')
+    def test_union_generic_accepts_first_type(self):
+        obj = load(WithUnion, {'value': 42})
 
+        self.assertEqual(obj.value, 42)
+
+    def test_union_generic_accepts_second_type(self):
+        obj = load(WithUnion, {'value': 'forty-two'})
+
+        self.assertEqual(obj.value, 'forty-two')
+
+    def test_union_generic_rejects_unknown_type(self):
         with self.assertRaises(TypeError):
             load(WithUnion, {'value': 3.14})
 
     def test_nested_dataclass_instance_passthrough(self):
         address = Address('NYC', '10001')
+
         obj = load(UserWithAddress, {'name': 'Bob', 'address': address})
+
         self.assertIs(obj.address, address)
 
     def test_roundtrip_nested_collections(self):
@@ -1011,35 +1086,32 @@ class TestNestedCollections(unittest.TestCase):
             'a': User('Alice', 30),
             'b': User('Bob', 25),
         })
+
         obj2 = load(WithDictOfDataclasses, dump(obj))
+
         self.assertEqual(obj, obj2)
 
     def test_nested_error_path_list_of_lists(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithNestedListOfLists, {'matrix': [[1, 2], [3, 'bad']]})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('matrix[1]', msg)
+
+        self.assertIn('matrix[1]', str(cm.exception))
 
     def test_nested_error_path_dict_of_lists(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithDictOfLists, {'groups': {'evens': [2, 'bad']}})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('groups', msg)
+
+        self.assertIn('groups', str(cm.exception))
 
     def test_nested_error_path_dict_of_dataclasses(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithDictOfDataclasses, {
                 'users': {'alice': {'name': 123, 'age': 30}}
             })
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('name', msg)
-            self.assertIn('str', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('name', msg)
+        self.assertIn('str', msg)
 
 
 # ---------------------------------------------------------------------------
@@ -1184,14 +1256,15 @@ class TestTypeVars(unittest.TestCase):
 
     def test_parameterized_dataclass_alias_top_level(self):
         obj = load(Box[int], {'value': 42})
+        obj2 = loads(Box[int], '{"value": 7}')
+        validate_result = validate(Box[int], {'value': 99})
+        validates_result = validates(Box[int], '{"value": 100}')
+
         self.assertIsInstance(obj, Box)
         self.assertEqual(obj.value, 42)
-
-        obj2 = loads(Box[int], '{"value": 7}')
         self.assertEqual(obj2.value, 7)
-
-        self.assertTrue(validate(Box[int], {'value': 99}))
-        self.assertTrue(validates(Box[int], '{"value": 100}'))
+        self.assertTrue(validate_result)
+        self.assertTrue(validates_result)
 
     def test_parameterized_dataclass_alias_top_level_rejects(self):
         with self.assertRaises(TypeError):
@@ -1266,65 +1339,65 @@ class TestTypeVars(unittest.TestCase):
 
     def test_parameterized_nested_dataclass_field(self):
         obj = load(WithParameterizedBox, {'box': {'value': 42}})
+
         self.assertIsInstance(obj.box, Box)
         self.assertEqual(obj.box.value, 42)
 
     def test_parameterized_nested_dataclass_field_rejects(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithParameterizedBox, {'box': {'value': 'bad'}})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('box.value', msg)
-            self.assertIn('int', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('box.value', msg)
+        self.assertIn('int', msg)
 
     def test_parameterized_nested_dataclass_list_field(self):
         obj = load(WithParameterizedBoxList,
                    {'boxes': [{'value': 1}, {'value': 2}]})
+
         self.assertEqual([box.value for box in obj.boxes], [1, 2])
         self.assertIsInstance(obj.boxes[0], Box)
 
     def test_parameterized_nested_dataclass_list_field_rejects(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithParameterizedBoxList,
                  {'boxes': [{'value': 1}, {'value': 'bad'}]})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('boxes[1].value', msg)
-            self.assertIn('int', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('boxes[1].value', msg)
+        self.assertIn('int', msg)
 
     def test_parameterized_nested_dataclass_dict_field(self):
         obj = load(WithParameterizedBoxDict,
                    {'boxes': {'first': {'value': 1}, 'second': {'value': 2}}})
+
         self.assertEqual(obj.boxes['first'].value, 1)
         self.assertEqual(obj.boxes['second'].value, 2)
 
     def test_parameterized_nested_dataclass_dict_field_rejects(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithParameterizedBoxDict,
                  {'boxes': {'first': {'value': 1}, 'bad': {'value': 'bad'}}})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('boxes[bad].value', msg)
-            self.assertIn('int', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('boxes[bad].value', msg)
+        self.assertIn('int', msg)
 
     def test_parameterized_nested_dataclass_field_resolved_to_dataclass(self):
         obj = load(WithParameterizedUserBox,
                    {'box': {'value': {'name': 'Alice', 'age': 30}}})
+
         self.assertIsInstance(obj.box.value, User)
         self.assertEqual(obj.box.value.name, 'Alice')
 
     def test_parameterized_nested_dataclass_field_resolved_to_dataclass_rejects(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithParameterizedUserBox,
                  {'box': {'value': {'name': 'Alice', 'age': 'bad'}}})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('box.value.age', msg)
-            self.assertIn('int', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('box.value.age', msg)
+        self.assertIn('int', msg)
 
     def test_list_typevar_resolved_to_dataclass(self):
         data = {'items': [{'name': 'Alice', 'age': 30}, {'name': 'Bob', 'age': 25}]}
@@ -1368,21 +1441,18 @@ class TestTypeVars(unittest.TestCase):
     # --- Error messages ---
 
     def test_typevar_error_message(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(Box, {'value': 'bad'}, type_vars={T: int})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('value', msg)
-            self.assertIn('int', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('value', msg)
+        self.assertIn('int', msg)
 
     def test_list_typevar_error_path(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(GenericList, {'items': [1, 'bad']}, type_vars={T: int})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('items[1]', msg)
+
+        self.assertIn('items[1]', str(cm.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -1584,13 +1654,12 @@ class TestConstrainedTypeVar(unittest.TestCase):
             load(ConstrainedList, {'items': [1, 3.14]})
 
     def test_constrained_error_message(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(ConstrainedBox, {'value': 3.14})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('value', msg)
-            self.assertIn('constraint', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('value', msg)
+        self.assertIn('constraint', msg)
 
 
 # ---------------------------------------------------------------------------
@@ -1616,6 +1685,7 @@ class TestDump(unittest.TestCase):
 
         original_dump = impl.dump
         calls = []
+        p = Point(7, 8)
 
         def marker_factory(pairs):
             return dict(pairs)
@@ -1626,19 +1696,21 @@ class TestDump(unittest.TestCase):
 
         try:
             impl.dump = fake_dump
-            p = Point(7, 8)
-            self.assertEqual(p.dump(), {'sentinel': 1})
-            self.assertEqual(json.loads(dumps(p)), {'sentinel': 1})
-            self.assertEqual(json.loads(p.dumps()), {'sentinel': 1})
-            self.assertEqual(
-                json.loads(dumps(p, dict_factory=marker_factory)),
-                {'sentinel': 1})
-            self.assertEqual(
-                json.loads(p.dumps(dict_factory=marker_factory)),
-                {'sentinel': 1})
+            generated_dump_result = p.dump()
+            module_dumps_result = json.loads(dumps(p))
+            generated_dumps_result = json.loads(p.dumps())
+            module_dumps_with_factory = json.loads(
+                dumps(p, dict_factory=marker_factory))
+            generated_dumps_with_factory = json.loads(
+                p.dumps(dict_factory=marker_factory))
         finally:
             impl.dump = original_dump
 
+        self.assertEqual(generated_dump_result, {'sentinel': 1})
+        self.assertEqual(module_dumps_result, {'sentinel': 1})
+        self.assertEqual(generated_dumps_result, {'sentinel': 1})
+        self.assertEqual(module_dumps_with_factory, {'sentinel': 1})
+        self.assertEqual(generated_dumps_with_factory, {'sentinel': 1})
         self.assertEqual([call[0] for call in calls], [p, p, p, p, p])
         self.assertIs(calls[3][1], marker_factory)
         self.assertIs(calls[4][1], marker_factory)
@@ -1658,10 +1730,13 @@ class TestDump(unittest.TestCase):
 
     def test_dumps_accepts_custom_serializer(self):
         _BytesSerializer.dump_kwargs = None
+
         payload = dumps(Point(1, 2), serializer=_BytesSerializer,
                         use_bin_type=True)
+        data = _BytesSerializer.loads(payload)
+
         self.assertTrue(payload.startswith(b'packed:'))
-        self.assertEqual(_BytesSerializer.loads(payload), {'x': 1, 'y': 2})
+        self.assertEqual(data, {'x': 1, 'y': 2})
         self.assertEqual(_BytesSerializer.dump_kwargs,
                          {'use_bin_type': True})
 
@@ -1678,12 +1753,16 @@ class TestDump(unittest.TestCase):
             dump = field(int)
             dumps = field(str)
 
-        obj = load(WithGeneratedMethodNameFields, {
+        data = {
             'load': 1,
             'loads': 'from-json',
             'dump': 2,
             'dumps': 'to-json',
-        })
+        }
+
+        obj = load(WithGeneratedMethodNameFields, data)
+        dumped = dump(obj)
+
         self.assertEqual(obj.load, 1)
         self.assertEqual(obj.loads, 'from-json')
         self.assertEqual(obj.dump, 2)
@@ -1692,7 +1771,7 @@ class TestDump(unittest.TestCase):
         self.assertFalse(callable(getattr(WithGeneratedMethodNameFields, 'loads', None)))
         self.assertFalse(callable(getattr(WithGeneratedMethodNameFields, 'dump', None)))
         self.assertFalse(callable(getattr(WithGeneratedMethodNameFields, 'dumps', None)))
-        self.assertEqual(dump(obj), {
+        self.assertEqual(dumped, {
             'load': 1,
             'loads': 'from-json',
             'dump': 2,
@@ -1712,26 +1791,34 @@ class TestDump(unittest.TestCase):
             dumps = field(str)
 
         base = GeneratedMethodBase.load({'x': 1})
-        self.assertEqual(base.x, 1)
-        self.assertEqual(GeneratedMethodBase.loads('{"x": 2}').x, 2)
-        self.assertEqual(GeneratedMethodBase(3).dump(), {'x': 3})
-        self.assertEqual(json.loads(GeneratedMethodBase(4).dumps())['x'], 4)
-
-        for name in ('load', 'loads', 'dump', 'dumps'):
-            self.assertFalse(hasattr(GeneratedMethodChild, name))
-
-        obj = load(GeneratedMethodChild, {
+        base_loaded = GeneratedMethodBase.loads('{"x": 2}')
+        base_dumped = GeneratedMethodBase(3).dump()
+        base_dumps_parsed = json.loads(GeneratedMethodBase(4).dumps())
+        child_has_generated_names = [
+            hasattr(GeneratedMethodChild, name)
+            for name in ('load', 'loads', 'dump', 'dumps')
+        ]
+        child_data = {
             'x': 5,
             'load': 6,
             'loads': 'from-json',
             'dump': 7,
             'dumps': 'to-json',
-        })
+        }
+        obj = load(GeneratedMethodChild, child_data)
+        dumped = dump(obj)
+
+        self.assertEqual(base.x, 1)
+        self.assertEqual(base_loaded.x, 2)
+        self.assertEqual(base_dumped, {'x': 3})
+        self.assertEqual(base_dumps_parsed['x'], 4)
+        self.assertEqual(child_has_generated_names,
+                         [False, False, False, False])
         self.assertEqual(obj.load, 6)
         self.assertEqual(obj.loads, 'from-json')
         self.assertEqual(obj.dump, 7)
         self.assertEqual(obj.dumps, 'to-json')
-        self.assertEqual(dump(obj), {
+        self.assertEqual(dumped, {
             'x': 5,
             'load': 6,
             'loads': 'from-json',
@@ -1762,15 +1849,18 @@ class TestDump(unittest.TestCase):
         class UserMethodChild(UserMethodBase):
             y = field(int)
 
-        self.assertEqual(UserMethodBase.load({}),
-                         'custom-load:UserMethodBase')
-        self.assertEqual(UserMethodChild.load({}),
-                         'custom-load:UserMethodChild')
-        self.assertEqual(UserMethodChild.loads('{}'),
-                         'custom-loads:UserMethodChild')
         obj = UserMethodChild(1, 2)
-        self.assertEqual(obj.dump(), {'custom': 1})
-        self.assertEqual(obj.dumps(), 'custom-dumps:1')
+        base_load = UserMethodBase.load({})
+        child_load = UserMethodChild.load({})
+        child_loads = UserMethodChild.loads('{}')
+        dumped = obj.dump()
+        dumped_payload = obj.dumps()
+
+        self.assertEqual(base_load, 'custom-load:UserMethodBase')
+        self.assertEqual(child_load, 'custom-load:UserMethodChild')
+        self.assertEqual(child_loads, 'custom-loads:UserMethodChild')
+        self.assertEqual(dumped, {'custom': 1})
+        self.assertEqual(dumped_payload, 'custom-dumps:1')
 
 
 # ---------------------------------------------------------------------------
@@ -1822,30 +1912,27 @@ class TestErrorMessages(unittest.TestCase):
 
     def test_nested_error_path(self):
         data = {'name': 'John', 'address': {'city': 123, 'zip_code': '10001'}}
-        try:
+
+        with self.assertRaises(TypeError) as cm:
             load(UserWithAddress, data)
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('address.city', msg)
-            self.assertIn('str', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('address.city', msg)
+        self.assertIn('str', msg)
 
     def test_list_element_error_path(self):
-        try:
+        with self.assertRaises(TypeError) as cm:
             load(WithList, {'values': [1, 'bad', 3]})
-            self.fail('Expected TypeError')
-        except TypeError as e:
-            msg = str(e)
-            self.assertIn('values[1]', msg)
+
+        self.assertIn('values[1]', str(cm.exception))
 
     def test_missing_field_error(self):
-        try:
+        with self.assertRaises(ValueError) as cm:
             load(Point, {'x': 1})
-            self.fail('Expected ValueError')
-        except ValueError as e:
-            msg = str(e)
-            self.assertIn('y', msg)
-            self.assertIn('Point', msg)
+
+        msg = str(cm.exception)
+        self.assertIn('y', msg)
+        self.assertIn('Point', msg)
 
 
 if __name__ == '__main__':
