@@ -901,11 +901,21 @@ def _frozen_get_del_attr(cls, fields, func_builder):
 
 
 def _is_classvar(a_type, typing):
-    return (a_type is typing.ClassVar
-            or (hasattr(typing, 'get_origin')
-                and typing.get_origin(a_type) is typing.ClassVar)
-            or (sys.version_info < (3,)
-                and type(a_type) == type(typing.ClassVar)))
+    get_origin = getattr(typing, 'get_origin', None)
+
+    # Plain ClassVar.
+    is_plain_classvar = a_type is typing.ClassVar
+    # Python 3.8+ ClassVar[T].
+    is_parametrized_classvar = (
+        get_origin is not None
+        and get_origin(a_type) is typing.ClassVar)
+    # Python 2 typing backport ClassVar[T].
+    is_py2_backport_classvar = (
+        sys.version_info < (3,)
+        and type(a_type) == type(typing.ClassVar))
+    return (is_plain_classvar
+            or is_parametrized_classvar
+            or is_py2_backport_classvar)
 
 
 def _is_initvar(a_type, dataclasses):
