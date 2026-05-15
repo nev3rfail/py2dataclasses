@@ -1043,7 +1043,7 @@ def _set_new_attribute(cls, name, value):
 
 
 class _GeneratedDataclassMethod(object):
-    """Descriptor for generated helpers that hides behind same-named fields."""
+    """Descriptor for generated helpers that yields to same-named fields."""
 
     def __init__(self, name, descriptor):
         self.name = name
@@ -1053,12 +1053,15 @@ class _GeneratedDataclassMethod(object):
         if cls is None:
             cls = type(obj)
         fields = getattr(cls, _FIELDS, None)
+        # A subclass may introduce a field after a base class generated this
+        # helper; let normal field access win in that case.
         if fields is not None and self.name in fields:
             raise AttributeError(self.name)
         return self.descriptor.__get__(obj, cls)
 
 
 def _can_add_generated_method(cls, name, field_names):
+    # Generated helpers are optional; never shadow user fields or inherited API.
     if name in field_names:
         return False
     for base in cls.__mro__:
@@ -1070,7 +1073,8 @@ def _can_add_generated_method(cls, name, field_names):
 def _check_generated_load_type_vars(cls, type_vars):
     # Python 3 typing aliases proxy classmethod access to the origin class, so
     # Box[int].load(...) arrives here as Box.load(...). Avoid silently accepting
-    # unresolved TypeVars; use load(Box[int], data) or pass type_vars explicitly.
+    # unresolved TypeVars. The generic marker attributes differ across typing
+    # runtimes, so probe them defensively.
     if not type_vars and (
             getattr(cls, '__parameters__', ()) or
             getattr(cls, '__origin__', None) is not None):
@@ -2276,6 +2280,7 @@ def _add_validation_issue(errors, path, message, expected=None, actual=None, val
 
 
 def _merge_type_vars(base_type_vars, extra_type_vars):
+    # Preserve outer generic context when resolving nested dataclass aliases.
     merged = {}
     if base_type_vars:
         merged.update(base_type_vars)
@@ -2288,7 +2293,10 @@ def _dataclass_type_and_type_vars(expected_type, type_vars=None):
     """Return (dataclass_cls, type_vars) for plain or parameterized dataclass types."""
     origin = _get_type_origin(expected_type)
     args = _get_type_args(expected_type)
-    if origin is not None and isinstance(origin, type) and hasattr(origin, _FIELDS):
+
+    # Parameterized dataclass alias, e.g. Box[int]. Use the origin class for
+    # construction and merge alias args into the current TypeVar context.
+    if isinstance(origin, type) and hasattr(origin, _FIELDS):
         params = getattr(origin, '__parameters__', ()) or ()
         alias_type_vars = {}
         for param, arg in zip(params, args):
@@ -2296,6 +2304,7 @@ def _dataclass_type_and_type_vars(expected_type, type_vars=None):
                 alias_type_vars[param] = _resolve_type(arg, type_vars)
         return origin, _merge_type_vars(type_vars, alias_type_vars)
 
+    # Plain dataclass type, e.g. User.
     if isinstance(expected_type, type) and hasattr(expected_type, _FIELDS):
         return expected_type, type_vars
 
