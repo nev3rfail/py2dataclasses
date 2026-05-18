@@ -457,7 +457,7 @@ reuse the same layer around JSON parsing/serialization by default. Pass
 ### `load(cls, data)` — dict to dataclass
 
 ```python
-from dataclasses import dataclass, field, load
+from dataclasses import dataclass, field, load, EXCLUDE
 
 @dataclass
 class User(object):
@@ -484,11 +484,27 @@ p = load(Person, {"name": "Bob", "address": {"city": "NYC"}})
 assert p.address.city == "NYC"
 ```
 
-Strict mode rejects extra keys:
+Unknown keys are rejected by default. Use `unknown=EXCLUDE` to ignore keys that
+cannot be loaded into the dataclass constructor, including extra keys,
+`ClassVar`, and `init=False` fields:
 
 ```python
-load(User, {"name": "Alice", "age": 30, "extra": 1}, strict=True)
+load(User, {"name": "Alice", "age": 30, "extra": 1})
 # raises TypeError: Unknown fields for User: extra
+
+user = load(User, {"name": "Alice", "age": 30, "extra": 1}, unknown=EXCLUDE)
+assert user == User("Alice", 30)
+```
+
+Scalar values use marshmallow-style coercion by default. Pass
+`strict_types=True` to require runtime values to already match the annotated
+types:
+
+```python
+load(User, {"name": "Alice", "age": "30"})  # age becomes 30
+
+load(User, {"name": "Alice", "age": "30"}, strict_types=True)
+# raises TypeError: Field 'age' expected int, got str
 ```
 
 Parameterized generic dataclasses are supported through the module-level
@@ -585,7 +601,7 @@ bad_data = {
 }
 
 try:
-    validate(User, bad_data, strict=True, collect_errors=True)
+    validate(User, bad_data, collect_errors=True)
 except ValidationError as exc:
     for issue in exc.errors:
         print("{0} {1}".format(issue.path, issue.message))
@@ -599,7 +615,7 @@ The same option is available on `load()`, `loads()`, `validate()`,
 `validates()`, and the generated class methods:
 
 ```python
-User.load(bad_data, strict=True, collect_errors=True)
+User.load(bad_data, collect_errors=True)
 User.loads('{"name": 123, "age": "bad"}', collect_errors=True)
 ```
 

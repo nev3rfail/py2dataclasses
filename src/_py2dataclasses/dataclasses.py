@@ -379,6 +379,9 @@ _ANY_MARKER = object()
 
 InitVar = make_alias("InitVar", "T")
 
+RAISE = 'raise'
+EXCLUDE = 'exclude'
+
 
 # Instances of Field are only ever created from within this module,
 # and only from the field() function, although Field instances are
@@ -1334,9 +1337,11 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # available for dataclasses with fields named load/dump/etc.
     field_names = set(fields.keys())
     if _can_add_generated_method(cls, 'load', field_names):
-        def _cls_load(klass, data, strict=False, type_vars=None, collect_errors=False):
+        def _cls_load(klass, data, unknown=RAISE, strict_types=False,
+                      type_vars=None, collect_errors=False):
             _check_generated_load_type_vars(klass, type_vars)
-            return load(klass, data, strict=strict, type_vars=type_vars,
+            return load(klass, data, unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         collect_errors=collect_errors)
         _cls_load.__name__ = 'load'
         _cls_load.__doc__ = 'Create an instance from a dictionary with type validation.'
@@ -1345,11 +1350,12 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             _GeneratedDataclassMethod('load', classmethod(_cls_load)))
 
     if _can_add_generated_method(cls, 'loads', field_names):
-        def _cls_loads(klass, payload, strict=False, type_vars=None,
-                       collect_errors=False, serializer=None,
+        def _cls_loads(klass, payload, unknown=RAISE, strict_types=False,
+                       type_vars=None, collect_errors=False, serializer=None,
                        **serializer_kwargs):
             _check_generated_load_type_vars(klass, type_vars)
-            return loads(klass, payload, strict=strict, type_vars=type_vars,
+            return loads(klass, payload, unknown=unknown,
+                         strict_types=strict_types, type_vars=type_vars,
                          collect_errors=collect_errors, serializer=serializer,
                          **serializer_kwargs)
         _cls_loads.__name__ = 'loads'
@@ -2269,6 +2275,93 @@ def _type_name(tp):
     return repr(tp)
 
 
+def _unsupported_type_message(expected_type):
+    return "unsupported type annotation {0}".format(_type_name(expected_type))
+
+
+def _validate_unknown_option(unknown):
+    if unknown not in (RAISE, EXCLUDE):
+        raise ValueError(
+            "unknown must be {0!r} or {1!r}, got {2!r}".format(
+                RAISE, EXCLUDE, unknown))
+    return unknown
+
+
+_BOOL_TRUTHY = set(['t', 'true', 'on', 'y', 'yes', '1'])
+_BOOL_FALSY = set(['f', 'false', 'off', 'n', 'no', '0'])
+
+
+def _coerce_plain_value(value, expected_type, strict_types):
+    if expected_type is int:
+        if type(value) is bool:
+            raise TypeError("expected int, got bool")
+        if strict_types:
+            if not isinstance(value, six.integer_types):
+                raise TypeError("expected int, got {0}".format(type(value).__name__))
+            return value
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            raise TypeError(
+                "expected int, got {0} (value: {1!r})".format(
+                    type(value).__name__, value))
+
+    if expected_type is float:
+        if type(value) is bool:
+            raise TypeError("expected float, got bool")
+        if strict_types:
+            if type(value) is not float:
+                raise TypeError("expected float, got {0}".format(type(value).__name__))
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError, OverflowError):
+            raise TypeError(
+                "expected float, got {0} (value: {1!r})".format(
+                    type(value).__name__, value))
+
+    if expected_type is bool:
+        if strict_types:
+            if type(value) is not bool:
+                raise TypeError("expected bool, got {0}".format(type(value).__name__))
+            return value
+        if isinstance(value, six.string_types):
+            normalized = value.lower()
+            if normalized in _BOOL_TRUTHY:
+                return True
+            if normalized in _BOOL_FALSY:
+                return False
+        elif value == 1:
+            return True
+        elif value == 0:
+            return False
+        raise TypeError(
+            "expected bool, got {0} (value: {1!r})".format(
+                type(value).__name__, value))
+
+    if expected_type is str:
+        if sys.version_info < (3,):
+            if isinstance(value, basestring):
+                return value
+        else:
+            if isinstance(value, str):
+                return value
+            if not strict_types and isinstance(value, bytes):
+                try:
+                    return value.decode('utf-8')
+                except UnicodeDecodeError:
+                    raise TypeError("expected utf-8 bytes for str")
+        raise TypeError(
+            "expected str, got {0} (value: {1!r})".format(
+                type(value).__name__, value))
+
+    if not isinstance(value, expected_type):
+        raise TypeError(
+            "expected {0}, got {1} (value: {2!r})".format(
+                expected_type.__name__, type(value).__name__, value))
+    return value
+
+
 def _join_path(path, field_name):
     if path:
         return "{0}.{1}".format(path, field_name)
@@ -2382,7 +2475,8 @@ def _resolve_load_type(cls, tp, type_vars=None):
 
 
 def _validate_and_convert(value, expected_type, field_name, path,
-                          strict=False, type_vars=None, create_instance=True):
+                          unknown=RAISE, strict_types=False, type_vars=None,
+                          create_instance=True):
     """Validate that value matches expected_type and convert nested structures.
 
     Returns the (possibly converted) value.
@@ -2400,14 +2494,16 @@ def _validate_and_convert(value, expected_type, field_name, path,
         constraints = getattr(expected_type, '__constraints__', ())
         if bound is not None:
             return _validate_and_convert(
-                value, bound, field_name, path, strict=strict,
-                type_vars=type_vars, create_instance=create_instance)
+                value, bound, field_name, path, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
+                create_instance=create_instance)
         if constraints:
             for ct in constraints:
                 try:
                     return _validate_and_convert(
-                        value, ct, field_name, path, strict=strict,
-                        type_vars=type_vars, create_instance=create_instance)
+                        value, ct, field_name, path, unknown=unknown,
+                        strict_types=strict_types, type_vars=type_vars,
+                        create_instance=create_instance)
                 except (TypeError, ValueError):
                     continue
             raise TypeError(
@@ -2440,8 +2536,9 @@ def _validate_and_convert(value, expected_type, field_name, path,
     if dataclass_type is not None:
         if isinstance(value, dict):
             return _load_inner(
-                dataclass_type, value, full_path, strict=strict,
-                type_vars=nested_type_vars, create_instance=create_instance)
+                dataclass_type, value, full_path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars,
+                create_instance=create_instance)
         elif isinstance(value, dataclass_type):
             return value
         else:
@@ -2464,7 +2561,8 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 return [
                     _validate_and_convert(
                         v, args[0], "{0}[{1}]".format(field_name, i), path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for i, v in enumerate(value)
                 ]
@@ -2480,11 +2578,13 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 return {
                     _validate_and_convert(
                         k, args[0], "{0}{{key}}".format(field_name), path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance):
                     _validate_and_convert(
                         v, args[1], "{0}[{1}]".format(field_name, k), path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for k, v in value.items()
                 }
@@ -2501,7 +2601,8 @@ def _validate_and_convert(value, expected_type, field_name, path,
                     return tuple(
                         _validate_and_convert(
                             v, args[0], "{0}[{1}]".format(field_name, i), path,
-                            strict=strict, type_vars=type_vars,
+                            unknown=unknown, strict_types=strict_types,
+                            type_vars=type_vars,
                             create_instance=create_instance)
                         for i, v in enumerate(value))
                 if len(args) != len(value):
@@ -2511,7 +2612,8 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 return tuple(
                     _validate_and_convert(
                         v, t, "{0}[{1}]".format(field_name, i), path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for i, (v, t) in enumerate(zip(value, args)))
             return tuple(value)
@@ -2526,7 +2628,8 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 return set(
                     _validate_and_convert(
                         v, args[0], "{0}{{{1}}}".format(field_name, i), path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for i, v in enumerate(value))
             return set(value)
@@ -2537,7 +2640,8 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 try:
                     return _validate_and_convert(
                         value, variant, field_name, path,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                 except (TypeError, ValueError):
                     continue
@@ -2545,34 +2649,26 @@ def _validate_and_convert(value, expected_type, field_name, path,
                 "Field '{0}' value {1!r} does not match any variant of {2}".format(
                     full_path, value, expected_type))
 
-        # Unknown generic -- pass through
-        return value
+        raise TypeError(
+            "Field '{0}' has {1}".format(
+                full_path, _unsupported_type_message(expected_type)))
 
     # Plain types (int, str, float, bool, etc.)
     if isinstance(expected_type, type):
-        # Strict: bool is NOT accepted as int
-        if expected_type is int and type(value) is bool:
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
             raise TypeError(
-                "Field '{0}' expected int, got bool".format(full_path))
-        # Allow int -> float coercion (JSON has no float/int distinction)
-        if expected_type is float and isinstance(value, int) and not isinstance(value, bool):
-            return float(value)
-        # Python 2: accept unicode for str and vice versa (JSON returns unicode)
-        check_type = expected_type
-        if sys.version_info < (3,) and expected_type is str:
-            check_type = basestring
-        if not isinstance(value, check_type):
-            raise TypeError(
-                "Field '{0}' expected {1}, got {2} (value: {3!r})".format(
-                    full_path, expected_type.__name__, type(value).__name__, value))
-        return value
+                "Field '{0}' {1}".format(full_path, exc))
 
-    # Unrecognized type -- pass through without validation
-    return value
+    raise TypeError(
+        "Field '{0}' has {1}".format(
+            full_path, _unsupported_type_message(expected_type)))
 
 
 def _validate_and_convert_collect(value, expected_type, path, errors,
-                                  strict=False, type_vars=None, create_instance=True):
+                                  unknown=RAISE, strict_types=False,
+                                  type_vars=None, create_instance=True):
     """Validate value and collect every issue reachable from this value."""
     # No type annotation or MISSING -- skip validation
     if expected_type is None or expected_type is MISSING:
@@ -2584,14 +2680,16 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
         constraints = getattr(expected_type, '__constraints__', ())
         if bound is not None:
             return _validate_and_convert_collect(
-                value, bound, path, errors, strict=strict, type_vars=type_vars,
+                value, bound, path, errors, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
                 create_instance=create_instance)
         if constraints:
             for ct in constraints:
                 trial_errors = []
                 converted = _validate_and_convert_collect(
-                    value, ct, path, trial_errors, strict=strict,
-                    type_vars=type_vars, create_instance=create_instance)
+                    value, ct, path, trial_errors, unknown=unknown,
+                    strict_types=strict_types, type_vars=type_vars,
+                    create_instance=create_instance)
                 if not trial_errors:
                     return converted
             _add_validation_issue(
@@ -2629,8 +2727,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
     if dataclass_type is not None:
         if isinstance(value, dict):
             return _load_inner_collect(
-                dataclass_type, value, path, strict=strict,
-                type_vars=nested_type_vars, errors=errors,
+                dataclass_type, value, path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars, errors=errors,
                 create_instance=create_instance)
         elif isinstance(value, dataclass_type):
             return value
@@ -2659,7 +2757,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                 return [
                     _validate_and_convert_collect(
                         v, args[0], "{0}[{1}]".format(path, i), errors,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for i, v in enumerate(value)
                 ]
@@ -2679,11 +2778,13 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                     item_start = len(errors)
                     converted_key = _validate_and_convert_collect(
                         k, args[0], "{0}{{key}}".format(path), errors,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     converted_value = _validate_and_convert_collect(
                         v, args[1], "{0}[{1}]".format(path, k), errors,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     if len(errors) == item_start:
                         result[converted_key] = converted_value
@@ -2703,7 +2804,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                     return tuple(
                         _validate_and_convert_collect(
                             v, args[0], "{0}[{1}]".format(path, i), errors,
-                            strict=strict, type_vars=type_vars,
+                            unknown=unknown, strict_types=strict_types,
+                            type_vars=type_vars,
                             create_instance=create_instance)
                         for i, v in enumerate(value))
                 if len(args) != len(value):
@@ -2715,7 +2817,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                 return tuple(
                     _validate_and_convert_collect(
                         v, t, "{0}[{1}]".format(path, i), errors,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     for i, (v, t) in enumerate(zip(value, args)))
             return tuple(value)
@@ -2734,7 +2837,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                     item_start = len(errors)
                     converted = _validate_and_convert_collect(
                         v, args[0], "{0}{{{1}}}".format(path, i), errors,
-                        strict=strict, type_vars=type_vars,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
                         create_instance=create_instance)
                     if len(errors) == item_start:
                         try:
@@ -2754,7 +2858,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                 trial_errors = []
                 converted = _validate_and_convert_collect(
                     value, variant, path, trial_errors,
-                    strict=strict, type_vars=type_vars,
+                    unknown=unknown, strict_types=strict_types,
+                    type_vars=type_vars,
                     create_instance=create_instance)
                 if not trial_errors:
                     return converted
@@ -2765,35 +2870,24 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                 expected_type, type(value).__name__, value)
             return value
 
-        # Unknown generic -- pass through
+        _add_validation_issue(
+            errors, path, _unsupported_type_message(expected_type),
+            expected_type, type(value).__name__, value)
         return value
 
     # Plain types (int, str, float, bool, etc.)
     if isinstance(expected_type, type):
-        # Strict: bool is NOT accepted as int
-        if expected_type is int and type(value) is bool:
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
             _add_validation_issue(
-                errors, path,
-                "expected int, got bool",
-                int, 'bool', value)
-            return value
-        # Allow int -> float coercion (JSON has no float/int distinction)
-        if expected_type is float and isinstance(value, int) and not isinstance(value, bool):
-            return float(value)
-        # Python 2: accept unicode for str and vice versa (JSON returns unicode)
-        check_type = expected_type
-        if sys.version_info < (3,) and expected_type is str:
-            check_type = basestring
-        if not isinstance(value, check_type):
-            _add_validation_issue(
-                errors, path,
-                "expected {0}, got {1} (value: {2!r})".format(
-                    expected_type.__name__, type(value).__name__, value),
+                errors, path, str(exc),
                 expected_type, type(value).__name__, value)
             return value
-        return value
 
-    # Unrecognized type -- pass through without validation
+    _add_validation_issue(
+        errors, path, _unsupported_type_message(expected_type),
+        expected_type, type(value).__name__, value)
     return value
 
 
@@ -2901,8 +2995,8 @@ def _field_type_for_load(cls, f, type_vars=None):
     return _resolve_load_type(owner, field_type, type_vars=field_type_vars)
 
 
-def _load_inner(cls, data, path="", strict=False, type_vars=None,
-                create_instance=True):
+def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
+                type_vars=None, create_instance=True):
     """Recursively validate a dict and optionally construct a dataclass instance."""
     if not isinstance(data, dict):
         raise TypeError(
@@ -2914,14 +3008,18 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
     known_keys = set()
 
     for f in all_fields.values():
-        # Skip ClassVar fields but track the name for strict mode
+        # Skip ClassVar fields; they are known but cannot be loaded.
         if f._field_type is _FIELD_CLASSVAR:
+            if unknown == RAISE and f.name in data:
+                raise TypeError(
+                    "Field '{0}' is ClassVar and cannot be loaded".format(
+                        _join_path(path, f.name)))
             known_keys.add(f.name)
             continue
 
         # Skip init=False fields
         if not f.init:
-            if strict and f.name in data:
+            if unknown == RAISE and f.name in data:
                 raise TypeError(
                     "Field '{0}' has init=False and cannot be loaded".format(
                         _join_path(path, f.name)))
@@ -2934,7 +3032,8 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
         if f.name in data:
             value = data[f.name]
             converted = _validate_and_convert(
-                value, field_type, f.name, path, strict=strict,
+                value, field_type, f.name, path, unknown=unknown,
+                strict_types=strict_types,
                 type_vars=type_vars, create_instance=create_instance)
             if create_instance:
                 kwargs[f.name] = converted
@@ -2951,8 +3050,8 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
                     "Missing required field '{0}' for {1}".format(
                         _join_path(path, f.name), cls.__name__))
 
-    # Check for extra keys
-    if strict:
+    # Check for unknown keys
+    if unknown == RAISE:
         extra = set(data.keys()) - known_keys
         if extra:
             prefix = path + "." if path else ""
@@ -2966,8 +3065,9 @@ def _load_inner(cls, data, path="", strict=False, type_vars=None,
     return True
 
 
-def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
-                        errors=None, create_instance=True):
+def _load_inner_collect(cls, data, path="", unknown=RAISE,
+                        strict_types=False, type_vars=None, errors=None,
+                        create_instance=True):
     """Recursively validate a dict while collecting validation issues."""
     if errors is None:
         errors = []
@@ -2988,14 +3088,19 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
     for f in all_fields.values():
         field_path = _join_path(path, f.name)
 
-        # Skip ClassVar fields but track the name for strict mode
+        # Skip ClassVar fields; they are known but cannot be loaded.
         if f._field_type is _FIELD_CLASSVAR:
+            if unknown == RAISE and f.name in data:
+                _add_validation_issue(
+                    errors, field_path,
+                    "is ClassVar and cannot be loaded",
+                    None, type(data[f.name]).__name__, data[f.name])
             known_keys.add(f.name)
             continue
 
         # Skip init=False fields
         if not f.init:
-            if strict and f.name in data:
+            if unknown == RAISE and f.name in data:
                 _add_validation_issue(
                     errors, field_path,
                     "has init=False and cannot be loaded",
@@ -3008,8 +3113,9 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
 
         if f.name in data:
             converted = _validate_and_convert_collect(
-                data[f.name], field_type, field_path, errors, strict=strict,
-                type_vars=type_vars, create_instance=create_instance)
+                data[f.name], field_type, field_path, errors, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
+                create_instance=create_instance)
             if create_instance:
                 kwargs[f.name] = converted
         else:
@@ -3026,8 +3132,8 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
                     "missing required field for {0}".format(cls.__name__),
                     f.type, 'missing', MISSING)
 
-    # Check for extra keys
-    if strict:
+    # Check for unknown keys
+    if unknown == RAISE:
         extra = set(data.keys()) - known_keys
         for name in sorted(extra):
             _add_validation_issue(
@@ -3043,13 +3149,15 @@ def _load_inner_collect(cls, data, path="", strict=False, type_vars=None,
     return True
 
 
-def load(cls, data, strict=False, type_vars=None, collect_errors=False):
+def load(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
+         collect_errors=False):
     """Create a dataclass instance from a dictionary with type validation.
 
     Args:
         cls: A dataclass class or parameterized dataclass alias.
         data: A dictionary mapping field names to values.
-        strict: If True, raise TypeError on extra keys in data.
+        unknown: RAISE to reject unknown/non-loadable keys, EXCLUDE to ignore them.
+        strict_types: If True, disable marshmallow-style scalar coercion.
         type_vars: Optional dict mapping TypeVars to concrete types,
             e.g. {T: int} to resolve generic fields.
         collect_errors: If True, collect all validation issues and raise
@@ -3063,17 +3171,21 @@ def load(cls, data, strict=False, type_vars=None, collect_errors=False):
         ValueError: If required fields are missing.
         ValidationError: If collect_errors=True and validation fails.
     """
+    unknown = _validate_unknown_option(unknown)
     cls, type_vars = _dataclass_type_and_type_vars(cls, type_vars)
     if cls is None:
         raise TypeError("load() should be called on a dataclass type")
     if collect_errors:
         errors = []
         obj = _load_inner_collect(
-            cls, data, strict=strict, type_vars=type_vars, errors=errors)
+            cls, data, unknown=unknown, strict_types=strict_types,
+            type_vars=type_vars, errors=errors)
         if errors:
             raise ValidationError(errors)
         return obj
-    return _load_inner(cls, data, strict=strict, type_vars=type_vars)
+    return _load_inner(
+        cls, data, unknown=unknown, strict_types=strict_types,
+        type_vars=type_vars)
 
 
 def _serializer_or_json(serializer):
@@ -3083,12 +3195,12 @@ def _serializer_or_json(serializer):
     return serializer
 
 
-def loads(cls, payload, strict=False, type_vars=None, collect_errors=False,
-          serializer=None, **serializer_kwargs):
+def loads(cls, payload, unknown=RAISE, strict_types=False, type_vars=None,
+          collect_errors=False, serializer=None, **serializer_kwargs):
     """Create a dataclass instance from serialized data with type validation."""
     data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
-    return load(cls, data, strict=strict, type_vars=type_vars,
-                collect_errors=collect_errors)
+    return load(cls, data, unknown=unknown, strict_types=strict_types,
+                type_vars=type_vars, collect_errors=collect_errors)
 
 
 def dump(obj, dict_factory=_default_dict_factory):
@@ -3103,28 +3215,33 @@ def dumps(obj, dict_factory=_default_dict_factory, serializer=None,
         dump(obj, dict_factory=dict_factory), **serializer_kwargs)
 
 
-def validate(cls, data, strict=False, type_vars=None, collect_errors=False):
+def validate(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
+             collect_errors=False):
     """Validate a dictionary against a dataclass schema without creating an instance."""
+    unknown = _validate_unknown_option(unknown)
     cls, type_vars = _dataclass_type_and_type_vars(cls, type_vars)
     if cls is None:
         raise TypeError("validate() should be called on a dataclass type")
     if collect_errors:
         errors = []
         _load_inner_collect(
-            cls, data, strict=strict, type_vars=type_vars, errors=errors,
+            cls, data, unknown=unknown, strict_types=strict_types,
+            type_vars=type_vars, errors=errors,
             create_instance=False)
         if errors:
             raise ValidationError(errors)
         return True
     _load_inner(
-        cls, data, strict=strict, type_vars=type_vars,
+        cls, data, unknown=unknown, strict_types=strict_types,
+        type_vars=type_vars,
         create_instance=False)
     return True
 
 
-def validates(cls, payload, strict=False, type_vars=None,
-              collect_errors=False, serializer=None, **serializer_kwargs):
+def validates(cls, payload, unknown=RAISE, strict_types=False,
+              type_vars=None, collect_errors=False, serializer=None,
+              **serializer_kwargs):
     """Validate serialized data against a dataclass schema without creating an instance."""
     data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
-    return validate(cls, data, strict=strict, type_vars=type_vars,
-                    collect_errors=collect_errors)
+    return validate(cls, data, unknown=unknown, strict_types=strict_types,
+                    type_vars=type_vars, collect_errors=collect_errors)

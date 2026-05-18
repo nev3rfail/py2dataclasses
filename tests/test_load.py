@@ -8,10 +8,11 @@ import unittest
 
 from dataclasses import (
     dataclass, field, load, loads, dump, dumps,
-    validate, validates, InitVar, ValidationError,
+    validate, validates, InitVar, ValidationError, RAISE, EXCLUDE,
 )
 from typing import (
     ClassVar, List, Dict, Tuple, Optional, Any, TypeVar, Generic, Set, Union,
+    Callable,
 )
 
 
@@ -176,6 +177,16 @@ class WithBool(object):
 @dataclass
 class WithStringType(object):
     value = field('int')
+
+
+@dataclass
+class WithUnresolvedType(object):
+    value = field('MissingAnnotation')
+
+
+@dataclass
+class WithCallableType(object):
+    callback = field(Callable[[int], str])
 
 
 @dataclass
@@ -434,8 +445,10 @@ class TestLoadBasic(unittest.TestCase):
         original_load = impl.load
         calls = []
 
-        def fake_load(cls, data, strict=False, type_vars=None, collect_errors=False):
-            calls.append((cls, data, strict, type_vars, collect_errors))
+        def fake_load(cls, data, unknown=RAISE, strict_types=False,
+                      type_vars=None, collect_errors=False):
+            calls.append((cls, data, unknown, strict_types, type_vars,
+                          collect_errors))
             return cls(9, 10)
 
         try:
@@ -503,22 +516,34 @@ class TestLoadBasic(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(Point, [1, 2])
 
-    def test_load_extra_keys_ignored(self):
-        p = load(Point, {'x': 1, 'y': 2, 'z': 3})
+    def test_load_extra_keys_raise_by_default(self):
+        with self.assertRaises(TypeError):
+            load(Point, {'x': 1, 'y': 2, 'z': 3})
+
+    def test_load_extra_keys_excluded(self):
+        p = load(Point, {'x': 1, 'y': 2, 'z': 3}, unknown=EXCLUDE)
         self.assertEqual(p.x, 1)
         self.assertEqual(p.y, 2)
 
-    def test_load_extra_keys_strict(self):
+    def test_load_extra_keys_unknown_raise(self):
         with self.assertRaises(TypeError):
-            load(Point, {'x': 1, 'y': 2, 'z': 3}, strict=True)
+            load(Point, {'x': 1, 'y': 2, 'z': 3}, unknown=RAISE)
 
-    def test_load_nested_extra_keys_strict(self):
+    def test_load_nested_extra_keys_raise_by_default(self):
         with self.assertRaises(TypeError):
             load(UserWithAddress,
                  {'name': 'John',
                   'address': {'city': 'NYC', 'zip_code': '10001',
-                              'extra': True}},
-                 strict=True)
+                              'extra': True}})
+
+    def test_load_nested_extra_keys_excluded(self):
+        obj = load(UserWithAddress,
+                   {'name': 'John',
+                    'address': {'city': 'NYC', 'zip_code': '10001',
+                                'extra': True}},
+                   unknown=EXCLUDE)
+
+        self.assertEqual(obj.address.city, 'NYC')
 
 
 # ---------------------------------------------------------------------------
@@ -539,14 +564,36 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(Point, {'x': True, 'y': 2})
 
+    def test_int_coerces_numeric_string(self):
+        obj = load(Point, {'x': '42', 'y': 2})
+
+        self.assertEqual(obj.x, 42)
+
+    def test_int_string_rejected_with_strict_types(self):
+        with self.assertRaises(TypeError):
+            load(Point, {'x': '42', 'y': 2}, strict_types=True)
+
     def test_int_to_float_coercion(self):
         obj = load(WithFloat, {'value': 42})
         self.assertIsInstance(obj.value, float)
         self.assertEqual(obj.value, 42.0)
 
+    def test_float_coerces_numeric_string(self):
+        obj = load(WithFloat, {'value': '3.14'})
+
+        self.assertEqual(obj.value, 3.14)
+
     def test_float_stays_float(self):
         obj = load(WithFloat, {'value': 3.14})
         self.assertEqual(obj.value, 3.14)
+
+    def test_float_int_rejected_with_strict_types(self):
+        with self.assertRaises(TypeError):
+            load(WithFloat, {'value': 42}, strict_types=True)
+
+    def test_float_string_rejected_with_strict_types(self):
+        with self.assertRaises(TypeError):
+            load(WithFloat, {'value': '3.14'}, strict_types=True)
 
     def test_bool_not_accepted_as_float(self):
         with self.assertRaises(TypeError):
@@ -555,6 +602,50 @@ class TestValidation(unittest.TestCase):
     def test_bool_valid(self):
         obj = load(WithBool, {'flag': True})
         self.assertTrue(obj.flag)
+
+    def test_bool_coerces_truthy_and_falsy_values(self):
+        truthy_values = ['true', 'True', '1', 1]
+        falsy_values = ['false', 'False', '0', 0]
+
+        for value in truthy_values:
+            self.assertIs(load(WithBool, {'flag': value}).flag, True)
+        for value in falsy_values:
+            self.assertIs(load(WithBool, {'flag': value}).flag, False)
+
+    def test_bool_rejects_unknown_string(self):
+        with self.assertRaises(TypeError):
+            load(WithBool, {'flag': 'maybe'})
+
+    def test_bool_string_rejected_with_strict_types(self):
+        with self.assertRaises(TypeError):
+            load(WithBool, {'flag': 'true'}, strict_types=True)
+
+    def test_bool_int_rejected_with_strict_types(self):
+        with self.assertRaises(TypeError):
+            load(WithBool, {'flag': 1}, strict_types=True)
+
+    def test_str_decodes_bytes_on_python3(self):
+        if sys.version_info < (3,):
+            self.skipTest('bytes are str on Python 2')
+
+        obj = load(User, {'name': b'Alice', 'age': 25})
+
+        self.assertEqual(obj.name, 'Alice')
+
+    def test_str_bytes_rejected_with_strict_types_on_python3(self):
+        if sys.version_info < (3,):
+            self.skipTest('bytes are str on Python 2')
+
+        with self.assertRaises(TypeError):
+            load(User, {'name': b'Alice', 'age': 25}, strict_types=True)
+
+    def test_recursive_coercion_respects_strict_types(self):
+        obj = load(WithList, {'values': ['1', '2']})
+
+        self.assertEqual(obj.values, [1, 2])
+
+        with self.assertRaises(TypeError):
+            load(WithList, {'values': ['1', '2']}, strict_types=True)
 
     def test_none_for_required_field(self):
         with self.assertRaises(TypeError):
@@ -595,6 +686,38 @@ class TestValidation(unittest.TestCase):
             validate(WithStringType, invalid_data, collect_errors=True)
         self.assertEqual([issue.path for issue in cm.exception.errors],
                          ['value'])
+
+    def test_unresolved_field_type_is_error(self):
+        data = {'value': 42}
+
+        with self.assertRaises(TypeError) as cm:
+            load(WithUnresolvedType, data)
+
+        self.assertIn('value', str(cm.exception))
+        self.assertIn('unsupported type annotation', str(cm.exception))
+
+        with self.assertRaises(ValidationError) as collect_cm:
+            validate(WithUnresolvedType, data, collect_errors=True)
+        self.assertEqual([issue.path for issue in collect_cm.exception.errors],
+                         ['value'])
+        self.assertIn('unsupported type annotation',
+                      collect_cm.exception.errors[0].message)
+
+    def test_unsupported_generic_field_type_is_error(self):
+        data = {'callback': lambda value: str(value)}
+
+        with self.assertRaises(TypeError) as cm:
+            load(WithCallableType, data)
+
+        self.assertIn('callback', str(cm.exception))
+        self.assertIn('unsupported type annotation', str(cm.exception))
+
+        with self.assertRaises(ValidationError) as collect_cm:
+            validate(WithCallableType, data, collect_errors=True)
+        self.assertEqual([issue.path for issue in collect_cm.exception.errors],
+                         ['callback'])
+        self.assertIn('unsupported type annotation',
+                      collect_cm.exception.errors[0].message)
 
     def test_future_annotations_are_resolved(self):
         if sys.version_info < (3,):
@@ -644,7 +767,7 @@ class TestCollectErrors(unittest.TestCase):
         data = {'name': 123, 'age': 'bad', 'extra': True}
 
         exc = self.assertValidationPaths(
-            lambda: load(User, data, strict=True, collect_errors=True),
+            lambda: load(User, data, unknown=RAISE, collect_errors=True),
             ['name', 'age', 'extra'])
 
         self.assertEqual(exc.errors[0].path, 'name')
@@ -654,7 +777,8 @@ class TestCollectErrors(unittest.TestCase):
         data = {'x': 'bad', 'z': 3}
 
         exc = self.assertValidationPaths(
-            lambda: validate(Point, data, strict=True, collect_errors=True),
+            lambda: validate(Point, data, unknown=RAISE,
+                             collect_errors=True),
             ['x', 'y', 'z'])
 
         messages = dict((issue.path, issue.message) for issue in exc.errors)
@@ -681,7 +805,7 @@ class TestCollectErrors(unittest.TestCase):
                 'groups[1].address',
             ])
 
-    def test_collect_errors_nested_strict_paths(self):
+    def test_collect_errors_nested_unknown_paths(self):
         data = {
             'name': 'John',
             'address': {
@@ -692,7 +816,7 @@ class TestCollectErrors(unittest.TestCase):
         }
 
         self.assertValidationPaths(
-            lambda: load(UserWithAddress, data, strict=True,
+            lambda: load(UserWithAddress, data, unknown=RAISE,
                          collect_errors=True),
             ['address.extra'])
 
@@ -751,7 +875,7 @@ class TestCollectErrors(unittest.TestCase):
 
     def test_collect_errors_self_mapped_constraint_path(self):
         with self.assertRaises(ValidationError) as cm:
-            load(ConstrainedBox, {'value': 3.14}, type_vars={CT: CT},
+            load(ConstrainedBox, {'value': []}, type_vars={CT: CT},
                  collect_errors=True)
 
         self.assertEqual([issue.path for issue in cm.exception.errors],
@@ -789,9 +913,9 @@ class TestCollectErrors(unittest.TestCase):
         self.assertEqual(obj.score, 0)
         self.assertEqual(obj.tags, [])
 
-    def test_collect_errors_init_false_strict_path(self):
+    def test_collect_errors_init_false_unknown_path(self):
         with self.assertRaises(ValidationError) as init_false:
-            load(WithInitFalse, {'x': 1, 'y': 2}, strict=True,
+            load(WithInitFalse, {'x': 1, 'y': 2}, unknown=RAISE,
                  collect_errors=True)
 
         self.assertEqual([issue.path for issue in init_false.exception.errors],
@@ -1103,7 +1227,7 @@ class TestNestedCollections(unittest.TestCase):
 
     def test_union_generic_rejects_unknown_type(self):
         with self.assertRaises(TypeError):
-            load(WithUnion, {'value': 3.14})
+            load(WithUnion, {'value': []})
 
     def test_nested_dataclass_instance_passthrough(self):
         address = Address('NYC', '10001')
@@ -1168,16 +1292,15 @@ class TestClassVarInitVar(unittest.TestCase):
         self.assertEqual(obj.x, 42)
         self.assertEqual(WithClassVar.class_val, 10)
 
-    def test_classvar_in_data_ignored(self):
-        obj = load(WithClassVar, {'x': 42, 'class_val': 999})
-        self.assertEqual(obj.x, 42)
-        # ClassVar stays at class-level default, not overwritten
-        self.assertEqual(WithClassVar.class_val, 10)
+    def test_classvar_in_data_raises_by_default(self):
+        with self.assertRaises(TypeError):
+            load(WithClassVar, {'x': 42, 'class_val': 999})
 
-    def test_classvar_in_data_strict_ignored(self):
-        # ClassVar keys are not "extra" -- they are just skipped
-        obj = load(WithClassVar, {'x': 42, 'class_val': 999}, strict=True)
+    def test_classvar_in_data_excluded(self):
+        obj = load(WithClassVar, {'x': 42, 'class_val': 999},
+                   unknown=EXCLUDE)
         self.assertEqual(obj.x, 42)
+        self.assertEqual(WithClassVar.class_val, 10)
 
     def test_classvar_not_in_fields(self):
         from dataclasses import fields as dc_fields
@@ -1223,14 +1346,17 @@ class TestClassVarInitVar(unittest.TestCase):
         self.assertEqual(obj.x, 5)
         self.assertEqual(obj.y, 10)  # set by __post_init__
 
-    def test_init_false_in_data_ignored(self):
-        # y is in the data but init=False, so it's ignored (non-strict)
-        obj = load(WithInitFalse, {'x': 5, 'y': 999})
+    def test_init_false_in_data_raises_by_default(self):
+        with self.assertRaises(TypeError):
+            load(WithInitFalse, {'x': 5, 'y': 999})
+
+    def test_init_false_in_data_excluded(self):
+        obj = load(WithInitFalse, {'x': 5, 'y': 999}, unknown=EXCLUDE)
         self.assertEqual(obj.y, 10)  # __post_init__ sets it, not the data
 
-    def test_init_false_in_data_strict_raises(self):
+    def test_init_false_in_data_unknown_raise(self):
         with self.assertRaises(TypeError):
-            load(WithInitFalse, {'x': 5, 'y': 999}, strict=True)
+            load(WithInitFalse, {'x': 5, 'y': 999}, unknown=RAISE)
 
     # --- Combined ClassVar + InitVar + init=False ---
 
@@ -1409,11 +1535,11 @@ class TestTypeVars(unittest.TestCase):
                 load(FuturePipeBox[int], {'maybe': 'bad', 'either': 42})
 
             with self.assertRaises(TypeError):
-                load(FuturePipeBox[int], {'maybe': 1, 'either': 1.5})
+                load(FuturePipeBox[int], {'maybe': 1, 'either': []})
 
             with self.assertRaises(ValidationError) as cm:
                 validate(FuturePipeBox[int],
-                         {'maybe': 'bad', 'either': 1.5},
+                         {'maybe': 'bad', 'either': []},
                          collect_errors=True)
             self.assertEqual([issue.path for issue in cm.exception.errors],
                              ['maybe', 'either'])
@@ -1570,7 +1696,7 @@ class TestTypeVars(unittest.TestCase):
         self.assertEqual(str_union_obj.either, 'ok')
 
     def test_generic_optional_union_fields_rejects(self):
-        data = {'maybe': 'bad', 'either': 1.5}
+        data = {'maybe': 'bad', 'either': []}
 
         with self.assertRaises(ValidationError) as cm:
             validate(GenericOptionalUnion[int], data, collect_errors=True)
@@ -2003,7 +2129,7 @@ class TestBoundTypeVar(unittest.TestCase):
             load(BoundIntBox, {'value': 'bad'})
 
     def test_bound_int_rejects_bool(self):
-        # bool is subclass of int, but our strict validation rejects bool for int
+        # bool is subclass of int, but runtime validation rejects bool for int
         with self.assertRaises(TypeError):
             load(BoundIntBox, {'value': True})
 
@@ -2022,9 +2148,14 @@ class TestConstrainedTypeVar(unittest.TestCase):
         obj = load(ConstrainedBox, {'value': 'hello'})
         self.assertEqual(obj.value, 'hello')
 
-    def test_constrained_rejects_float(self):
+    def test_constrained_coerces_float_to_int(self):
+        obj = load(ConstrainedBox, {'value': 3.14})
+
+        self.assertEqual(obj.value, 3)
+
+    def test_constrained_rejects_float_with_strict_types(self):
         with self.assertRaises(TypeError):
-            load(ConstrainedBox, {'value': 3.14})
+            load(ConstrainedBox, {'value': 3.14}, strict_types=True)
 
     def test_constrained_rejects_list(self):
         with self.assertRaises(TypeError):
@@ -2035,7 +2166,7 @@ class TestConstrainedTypeVar(unittest.TestCase):
             load(ConstrainedBox, {'value': None})
 
     def test_constrained_rejects_bool(self):
-        # bool is subclass of int but strict validation rejects it
+        # bool is subclass of int but runtime validation rejects it
         with self.assertRaises(TypeError):
             load(ConstrainedBox, {'value': True})
 
@@ -2047,13 +2178,19 @@ class TestConstrainedTypeVar(unittest.TestCase):
         obj = load(ConstrainedList, {'items': ['a', 'b']})
         self.assertEqual(obj.items, ['a', 'b'])
 
-    def test_constrained_list_rejects_float(self):
+    def test_constrained_list_coerces_float_to_int(self):
+        obj = load(ConstrainedList, {'items': [1, 3.14]})
+
+        self.assertEqual(obj.items, [1, 3])
+
+    def test_constrained_list_rejects_float_with_strict_types(self):
         with self.assertRaises(TypeError):
-            load(ConstrainedList, {'items': [1, 3.14]})
+            load(ConstrainedList, {'items': [1, 3.14]},
+                 strict_types=True)
 
     def test_constrained_error_message(self):
         with self.assertRaises(TypeError) as cm:
-            load(ConstrainedBox, {'value': 3.14})
+            load(ConstrainedBox, {'value': []})
 
         msg = str(cm.exception)
         self.assertIn('value', msg)

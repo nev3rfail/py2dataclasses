@@ -78,6 +78,12 @@ payload = dumps(Point(3, 4), serializer=msgpack, use_bin_type=True)
 point = loads(Point, payload, serializer=msgpack, raw=False)
 ```
 
+`load()` / `loads()` reject unknown input keys by default. Pass
+`unknown=EXCLUDE` to ignore unknown, `ClassVar`, or `init=False` input keys.
+Scalar fields use marshmallow-style coercion by default; pass
+`strict_types=True` to require values to already match their annotated runtime
+types.
+
 
 ## Development
 
