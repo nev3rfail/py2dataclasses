@@ -189,12 +189,13 @@ class Manual(object):
 
 ### `cache=True` (default) — helper metadata cache
 
-`load()`, `validate()`, `dump()`, `asdict()`, and `fields()` cache resolved
-dataclass metadata by default for faster repeated calls. This assumes the
-dataclass schema stays static after class creation.
+`load()`, `loads()`, `validate()`, `validates()`, `dump()`, `dumps()`,
+`asdict()`, and `fields()` cache resolved dataclass metadata by default for
+faster repeated calls.
 
-If a class intentionally mutates `__annotations__`, `__dataclass_fields__`, or
-field metadata at runtime, disable these helper caches for that class:
+For classes that intentionally update `__annotations__`,
+`__dataclass_fields__`, or field metadata at runtime, disable these helper
+caches for that class:
 
 ```python
 @dataclass(cache=False)
@@ -555,8 +556,7 @@ assert user.name == "Alice"
 
 `dump()` and `dumps()` serialize the current dataclass instance. They do not
 re-run load-time validation. By default they reuse cached field metadata from
-`@dataclass(cache=True)`; use `cache=False` on the dataclass only for dynamic
-runtime schemas.
+`@dataclass(cache=True)`.
 
 ```python
 from dataclasses import dump

@@ -86,14 +86,12 @@ types. `dump()` / `dumps()` serialize the current dataclass instance and do not
 run load-time validation.
 
 Dataclass helper caches are enabled by default with `@dataclass(cache=True)`.
-The `load()` / `loads()` / `validate()` / `validates()` / `dump()` / `dumps()`
-schema is expected to stay static after the class is created. Avoid mutating
-field definitions, field types, `__annotations__`, `__dataclass_fields__`, or
-`ClassVar` / `init=False` metadata for classes that use these APIs, especially
-after the first helper call. For dynamic schemas, prefer creating a new
-dataclass type or opt out per class with `@dataclass(cache=False)` /
-`make_dataclass(..., cache=False)`. Disabling the cache preserves dynamic field
-metadata behavior but gives up the repeated load/dump speedups.
+The repeated `load()` / `loads()` / `validate()` / `validates()` / `dump()` /
+`dumps()` path reuses resolved field metadata for better performance. Classes
+that intentionally update field definitions, field types, `__annotations__`,
+`__dataclass_fields__`, or `ClassVar` / `init=False` metadata at runtime can opt
+out per class with `@dataclass(cache=False)` or
+`make_dataclass(..., cache=False)`.
 
 
 ## Development

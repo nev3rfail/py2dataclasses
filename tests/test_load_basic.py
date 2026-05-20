@@ -139,14 +139,14 @@ class TestLoadPlanCache(unittest.TestCase):
             pass
         return impl
 
-    def test_load_plan_cache_covers_common_shapes(self):
+    def _assert_load_common_shapes(self, cache_enabled):
         import _py2dataclasses.dataclasses as impl
 
-        @dataclass
+        @dataclass(cache=cache_enabled)
         class PlanInner(object):
             value = field(int)
 
-        @dataclass
+        @dataclass(cache=cache_enabled)
         class PlanShape(object):
             scalar = field(int)
             optional = field(Optional[int])
@@ -176,17 +176,27 @@ class TestLoadPlanCache(unittest.TestCase):
         self.assertEqual(obj.mapping, {'a': 6})
         self.assertEqual(obj.pair, (7, 'seven'))
         self.assertEqual(obj.value_set, set([8, 9]))
+        self.assertEqual(PlanShape.__dataclass_params__.cache, cache_enabled)
 
-        cache = getattr(PlanShape, impl._LOAD_FIELD_PLAN_CACHE)
-        self.assertEqual(
-            sorted(cache.keys()),
-            ['any_value', 'mapping', 'nested', 'optional', 'pair',
-             'scalar', 'value_set', 'values'])
-        first_plans = dict(cache)
+        if cache_enabled:
+            cache = getattr(PlanShape, impl._LOAD_FIELD_PLAN_CACHE)
+            self.assertEqual(
+                sorted(cache.keys()),
+                ['any_value', 'mapping', 'nested', 'optional', 'pair',
+                 'scalar', 'value_set', 'values'])
+            first_plans = dict(cache)
 
-        load(PlanShape, payload)
-        for name, plan in first_plans.items():
-            self.assertIs(cache[name], plan)
+            load(PlanShape, payload)
+            for name, plan in first_plans.items():
+                self.assertIs(cache[name], plan)
+        else:
+            self.assertFalse(hasattr(PlanShape, impl._LOAD_CLASS_PLAN_CACHE))
+            self.assertFalse(hasattr(PlanShape, impl._LOAD_FIELD_TYPE_CACHE))
+            self.assertFalse(hasattr(PlanShape, impl._LOAD_FIELD_PLAN_CACHE))
+
+    def test_load_common_shapes_with_and_without_cache(self):
+        for cache_enabled in (True, False):
+            self._assert_load_common_shapes(cache_enabled)
 
     def test_load_plan_cache_is_per_class_for_same_field_name(self):
         import _py2dataclasses.dataclasses as impl
@@ -262,22 +272,38 @@ class TestLoadPlanCache(unittest.TestCase):
         self.assertEqual([f.name for f in loadable_fields], ['x'])
         self.assertIsNotNone(ordered_entries)
 
-    def test_cache_false_disables_load_and_validate_caches(self):
+    def _assert_load_and_validate_cache_option(self, cache_enabled):
         import _py2dataclasses.dataclasses as impl
 
-        @dataclass(cache=False)
-        class LoadNoCache(object):
+        @dataclass(cache=cache_enabled)
+        class LoadCacheOption(object):
             values = field(List[int])
 
-        loaded = LoadNoCache.load({'values': ['1', 2]})
-        validated = validate(LoadNoCache, {'values': ['3', 4]})
+        loaded = LoadCacheOption.load({'values': ['1', 2]})
+        validated = validate(LoadCacheOption, {'values': ['3', 4]})
 
-        self.assertFalse(LoadNoCache.__dataclass_params__.cache)
+        self.assertEqual(LoadCacheOption.__dataclass_params__.cache,
+                         cache_enabled)
         self.assertEqual(loaded.values, [1, 2])
         self.assertTrue(validated)
-        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_CLASS_PLAN_CACHE))
-        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_FIELD_TYPE_CACHE))
-        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_FIELD_PLAN_CACHE))
+        if cache_enabled:
+            self.assertTrue(hasattr(
+                LoadCacheOption, impl._LOAD_CLASS_PLAN_CACHE))
+            self.assertTrue(hasattr(
+                LoadCacheOption, impl._LOAD_FIELD_TYPE_CACHE))
+            self.assertTrue(hasattr(
+                LoadCacheOption, impl._LOAD_FIELD_PLAN_CACHE))
+        else:
+            self.assertFalse(hasattr(
+                LoadCacheOption, impl._LOAD_CLASS_PLAN_CACHE))
+            self.assertFalse(hasattr(
+                LoadCacheOption, impl._LOAD_FIELD_TYPE_CACHE))
+            self.assertFalse(hasattr(
+                LoadCacheOption, impl._LOAD_FIELD_PLAN_CACHE))
+
+    def test_load_and_validate_with_and_without_cache(self):
+        for cache_enabled in (True, False):
+            self._assert_load_and_validate_cache_option(cache_enabled)
 
 
 # ---------------------------------------------------------------------------

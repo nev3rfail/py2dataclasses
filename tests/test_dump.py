@@ -83,15 +83,15 @@ class TestDump(unittest.TestCase):
         d = dump(obj)
         self.assertEqual(d['address']['city'], 'NYC')
 
-    def test_dump_ordered_dict_factory_preserves_order(self):
+    def _assert_dump_ordered_dict_factory_preserves_order(self, cache_enabled):
         from collections import OrderedDict
 
-        @dataclass
+        @dataclass(cache=cache_enabled)
         class OrderedDumpInner(object):
             left = field(int)
             right = field(int)
 
-        @dataclass
+        @dataclass(cache=cache_enabled)
         class OrderedDumpOuter(object):
             name = field(str)
             count = field(int)
@@ -104,6 +104,13 @@ class TestDump(unittest.TestCase):
         self.assertIs(type(d['inner']), OrderedDict)
         self.assertEqual(list(d.keys()), ['name', 'count', 'inner'])
         self.assertEqual(list(d['inner'].keys()), ['left', 'right'])
+        self.assertEqual(OrderedDumpOuter.__dataclass_params__.cache,
+                         cache_enabled)
+
+    def test_dump_ordered_dict_factory_preserves_order(self):
+        for cache_enabled in (True, False):
+            self._assert_dump_ordered_dict_factory_preserves_order(
+                cache_enabled)
 
     def test_dump_custom_dict_factory_still_receives_pairs(self):
         calls = []
@@ -139,32 +146,44 @@ class TestDump(unittest.TestCase):
             getattr(DumpFieldsBase, impl._FIELDS_CACHE),
             getattr(DumpFieldsChild, impl._FIELDS_CACHE))
 
-    def test_cache_false_disables_fields_cache(self):
+    def _assert_fields_cache_option(self, cache_enabled):
         import _py2dataclasses.dataclasses as impl
 
-        @dataclass(cache=False)
-        class DumpNoCache(object):
+        @dataclass(cache=cache_enabled)
+        class DumpCacheOption(object):
             x = field(int)
 
-        first_fields = impl.fields(DumpNoCache)
-        second_fields = impl.fields(DumpNoCache)
-        dumped = dump(DumpNoCache(1))
+        first_fields = impl.fields(DumpCacheOption)
+        second_fields = impl.fields(DumpCacheOption)
+        dumped = dump(DumpCacheOption(1))
 
-        self.assertFalse(DumpNoCache.__dataclass_params__.cache)
-        self.assertIsNot(first_fields, second_fields)
+        self.assertEqual(DumpCacheOption.__dataclass_params__.cache,
+                         cache_enabled)
         self.assertEqual([f.name for f in first_fields], ['x'])
         self.assertEqual(dumped, {'x': 1})
-        self.assertFalse(hasattr(DumpNoCache, impl._FIELDS_CACHE))
+        if cache_enabled:
+            self.assertIs(first_fields, second_fields)
+            self.assertTrue(hasattr(DumpCacheOption, impl._FIELDS_CACHE))
+        else:
+            self.assertIsNot(first_fields, second_fields)
+            self.assertFalse(hasattr(DumpCacheOption, impl._FIELDS_CACHE))
 
-    def test_make_dataclass_accepts_cache_false(self):
+    def test_fields_with_and_without_cache(self):
+        for cache_enabled in (True, False):
+            self._assert_fields_cache_option(cache_enabled)
+
+    def test_make_dataclass_accepts_cache_option(self):
         import _py2dataclasses.dataclasses as impl
 
-        MadeNoCache = impl.make_dataclass(
-            'MadeNoCache', [('x', int)], cache=False)
+        for cache_enabled in (True, False):
+            Made = impl.make_dataclass(
+                'MadeCacheOption{0}'.format(cache_enabled),
+                [('x', int)], cache=cache_enabled)
 
-        self.assertFalse(MadeNoCache.__dataclass_params__.cache)
-        self.assertEqual(impl.fields(MadeNoCache)[0].name, 'x')
-        self.assertFalse(hasattr(MadeNoCache, impl._FIELDS_CACHE))
+            self.assertEqual(Made.__dataclass_params__.cache, cache_enabled)
+            self.assertEqual(impl.fields(Made)[0].name, 'x')
+            self.assertEqual(hasattr(Made, impl._FIELDS_CACHE),
+                             cache_enabled)
 
     def test_generated_method_names_do_not_override_fields(self):
         @dataclass
