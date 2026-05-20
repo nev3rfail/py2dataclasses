@@ -46,6 +46,9 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+# tox XML reports written to the repository root
+/test_*.xml
+/*-coverage.xml
 *.cover
 *.py,cover
 .hypothesis/

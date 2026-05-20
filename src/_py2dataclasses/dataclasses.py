@@ -60,12 +60,14 @@ import keyword
 import itertools
 import weakref
 from collections import OrderedDict
-from types import NoneType
 
 import six
 
 from .abc_utils import update_abstractmethods
-from .type_utils import make_alias, _get_type_str, MISSING, _MISSING_TYPE
+from .type_utils import (
+    make_alias, _get_type_str, MISSING, _MISSING_TYPE,
+    _get_type_origin, _get_type_args, _is_optional, _origin_is, _resolve_type,
+)
 from .reprlib import recursive_repr, repr as actual_recursive_repr
 from .string_utils import isidentifier
 
@@ -115,15 +117,45 @@ if _annotationlib is not None:
                     return ann._evaluate(globals_dict, globals_dict,
                                          recursive_guard=frozenset())
         elif hasattr(ann, '__args__') and ann.__args__:
-            # Generic alias like list[ForwardRef('undefined')]:
-            # evaluate inner args to trigger NameError for unresolvable refs.
+            # Generic alias like list[ForwardRef('undefined')].
+            origin = _get_type_origin(ann)
+            resolved_args = []
+            changed = False
             for arg in ann.__args__:
-                _evaluate_annotation(arg, globals_dict)
+                resolved = _evaluate_annotation(arg, globals_dict)
+                resolved_args.append(resolved)
+                if resolved is not arg:
+                    changed = True
+            if not changed:
+                return ann
+            if hasattr(ann, 'copy_with'):
+                return ann.copy_with(tuple(resolved_args))
+            if origin is not None:
+                try:
+                    if len(resolved_args) == 1:
+                        return origin[resolved_args[0]]
+                    return origin[tuple(resolved_args)]
+                except TypeError:
+                    pass
             return ann
         return ann
 
 
-    def _make_annotate_function(__class__, method_name, annotation_fields, return_type, field_annotations=None):
+    def _annotation_to_string(ann):
+        if isinstance(ann, str):
+            return ann
+        if isinstance(ann, _annotationlib.ForwardRef):
+            return ann.__forward_arg__
+        origin = _get_type_origin(ann)
+        args = _get_type_args(ann)
+        if origin is not None and args:
+            return "{0}[{1}]".format(
+                _annotationlib.type_repr(origin),
+                ", ".join(_annotation_to_string(arg) for arg in args))
+        return _annotationlib.type_repr(ann)
+
+
+    def _make_annotate_function(__class__, method_name, annotation_fields, return_type):
         """Create an __annotate__ function for a generated dataclass method (PEP 649)."""
         if __class__.__module__ in sys.modules:
             __class_globals__ = sys.modules[__class__.__module__].__dict__
@@ -137,50 +169,45 @@ if _annotationlib is not None:
         def __annotate__(format):
             Format = _annotationlib.Format
             if format in (Format.VALUE, Format.FORWARDREF, Format.STRING):
-                # Use the field_annotations captured in the closure instead of trying to fetch
-                # them from the class at runtime, which can cause issues with special descriptors
-                cls_annotations = field_annotations if field_annotations is not None else {}
+                if method_name == '__annotate__':
+                    raw_annotations = __class__.__dict__.get('__annotations__', {})
+                    if not raw_annotations:
+                        raw_annotations = OrderedDict()
+                        for field_name, field_obj in getattr(
+                                __class__, _FIELDS, {}).items():
+                            if getattr(field_obj, 'type', MISSING) is not MISSING:
+                                raw_annotations[field_name] = field_obj.type
+                    new_annotations = OrderedDict()
+                    for k in annotation_fields:
+                        if k not in raw_annotations:
+                            continue
+                        ann = raw_annotations[k]
+                        if format == Format.VALUE:
+                            new_annotations[k] = _evaluate_annotation(
+                                ann, __class_globals__)
+                        elif format == Format.STRING:
+                            new_annotations[k] = _annotation_to_string(ann)
+                        else:
+                            new_annotations[k] = ann
+                    return new_annotations
+
+                cls_annotations = OrderedDict()
+                for base in reversed(__class__.__mro__):
+                    cls_annotations.update(
+                        _annotationlib.get_annotations(base, format=format)
+                    )
+
                 new_annotations = OrderedDict()
 
-                if format == Format.VALUE:
-                    # Evaluate ALL class annotations — NameError propagates for any
-                    # unresolvable ref, even those not in annotation_fields (non-init fields).
-                    # This matches CPython behaviour: the __init__ annotate function must
-                    # raise NameError if any annotation in the class cannot be resolved,
-                    # regardless of whether that field participates in __init__.
-                    for k, ann in cls_annotations.items():
-                        resolved = _evaluate_annotation(ann, __class_globals__)
-                        if k in annotation_fields:
-                            new_annotations[k] = resolved
-                    if return_type is not MISSING:
-                        new_annotations["return"] = return_type
+                for k in annotation_fields:
+                    if k in cls_annotations:
+                        new_annotations[k] = cls_annotations[k]
 
-                elif format == Format.FORWARDREF:
-                    for k in annotation_fields:
-                        if k in cls_annotations:
-                            ann = cls_annotations[k]
-                            if isinstance(ann, str):
-                                try:
-                                    new_annotations[k] = eval(ann, __class_globals__)
-                                except NameError:
-                                    new_annotations[k] = _annotationlib.ForwardRef(ann, is_class=True)
-                            else:
-                                new_annotations[k] = ann
-                    if return_type is not MISSING:
-                        new_annotations["return"] = return_type
-
-                elif format == Format.STRING:
-                    for k in annotation_fields:
-                        if k in cls_annotations:
-                            ann = cls_annotations[k]
-                            if isinstance(ann, str):
-                                new_annotations[k] = ann
-                            elif isinstance(ann, _annotationlib.ForwardRef):
-                                new_annotations[k] = ann.__forward_arg__
-                            else:
-                                new_annotations[k] = _annotationlib.type_repr(ann)
-                    if return_type is not MISSING:
+                if return_type is not MISSING:
+                    if format == Format.STRING:
                         new_annotations["return"] = _annotationlib.type_repr(return_type)
+                    else:
+                        new_annotations["return"] = return_type
 
                 return new_annotations
             else:
@@ -214,6 +241,42 @@ _DataclassT = typing.TypeVar("_DataclassT", bound=DataclassInstance)
 # Raised when an attempt is made to modify a frozen class.
 class FrozenInstanceError(AttributeError):
     pass
+
+
+class ValidationIssue(object):
+    """One validation problem collected during dataclass loading."""
+
+    def __init__(self, path, message, expected=None, actual=None, value=None):
+        self.path = path
+        self.message = message
+        self.expected = expected
+        self.actual = actual
+        self.value = value
+
+    def __repr__(self):
+        return ('ValidationIssue(path={0!r}, message={1!r}, '
+                'expected={2!r}, actual={3!r}, value={4!r})').format(
+                    self.path, self.message, self.expected, self.actual, self.value)
+
+    def __str__(self):
+        if self.path:
+            return '{0}: {1}'.format(self.path, self.message)
+        return self.message
+
+
+class ValidationError(ValueError):
+    """Raised when collect_errors=True finds one or more validation issues."""
+
+    def __init__(self, errors):
+        self.errors = list(errors)
+        ValueError.__init__(self, self.__str__())
+
+    def __str__(self):
+        count = len(self.errors)
+        noun = 'error' if count == 1 else 'errors'
+        lines = ['Validation failed with {0} {1}:'.format(count, noun)]
+        lines.extend('- {0}'.format(issue) for issue in self.errors)
+        return '\n'.join(lines)
 
 
 # A sentinel object for default values to signal that a default
@@ -257,9 +320,31 @@ _FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
 # objects.  Also used to check if a class is a Data Class.
 _FIELDS = '__dataclass_fields__'
 
+# The name of an attribute on the class where load()/validate() cache resolved
+# field types for the common non-parameterized path.
+_LOAD_FIELD_TYPE_CACHE = '__dataclass_load_field_type_cache__'
+
+# The name of an attribute on the class where load()/validate() cache resolved
+# field validation plans for the common non-parameterized path.
+_LOAD_FIELD_PLAN_CACHE = '__dataclass_load_field_plan_cache__'
+
+# The name of an attribute on the class where load()/validate() cache field
+# iteration metadata for the common non-collecting path.
+_LOAD_CLASS_PLAN_CACHE = '__dataclass_load_class_plan_cache__'
+
+# The name of an attribute on the class where fields() caches real dataclass
+# fields, excluding ClassVar and InitVar pseudo-fields.
+_FIELDS_CACHE = '__dataclass_real_fields_cache__'
+
 # The name of an attribute on the class that stores the parameters to
 # @dataclass.
 _PARAMS = '__dataclass_params__'
+
+
+def _dataclass_cache_enabled(cls):
+    params = getattr(cls, _PARAMS, None)
+    return getattr(params, 'cache', True)
+
 
 # The name of the function, that if it exists, is called at the end of
 # __init__.
@@ -291,7 +376,7 @@ def _build_atomic_types():
     _types = set()
     # These are universally available via type():
     _types.add(type(None))  # NoneType
-    _types.add(type(types.EllipsisType))  # EllipsisType  (Ellipsis exists in Py2 too)
+    _types.add(type(Ellipsis))  # EllipsisType  (Ellipsis exists in Py2 too)
     _types.add(type(NotImplemented))  # NotImplementedType
     # Standard built-ins present on both Py2 and Py3:
     for _t in (bool, int, float, str, complex, bytes, type, property,
@@ -314,6 +399,9 @@ _ATOMIC_TYPES = _build_atomic_types()
 _ANY_MARKER = object()
 
 InitVar = make_alias("InitVar", "T")
+
+RAISE = 'raise'
+EXCLUDE = 'exclude'
 
 
 # Instances of Field are only ever created from within this module,
@@ -420,11 +508,16 @@ class Field(_Field):
         if hasattr(self.default, "__get__"):
             v = self.default.__get__(instance, owner)
         else:
-            if not instance:
+            if instance is None:
                 v = self
-            elif self.name and hasattr(instance, self.name):
-                v = object.__getattribute__(self, self.name)
             else:
+                if self.name:
+                    try:
+                        instance_dict = object.__getattribute__(instance, '__dict__')
+                    except AttributeError:
+                        instance_dict = None
+                    if instance_dict is not None and self.name in instance_dict:
+                        return instance_dict[self.name]
                 v = self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(
                     AttributeError, "object has no attribute {}".format(self.name))
                 # v = (self.default if self.default is not MISSING
@@ -439,10 +532,13 @@ class Field(_Field):
         elif hasattr(type(self.default), "__set__"):
             # descriptor
             type(self.default).__set__(instance, value)
-        elif self.default is value:
-            pass
         else:
-            raise RuntimeError()
+            try:
+                instance_dict = object.__getattribute__(instance, '__dict__')
+            except AttributeError:
+                raise AttributeError(
+                    "object has no writable attribute {}".format(self.name))
+            instance_dict[self.name] = value
 
     def __set_name__(self, owner, name):
         _Field.__set_name__(self, owner, name)
@@ -460,10 +556,11 @@ class _DataclassParams(object):
                  'kw_only',
                  'slots',
                  'weakref_slot',
+                 'cache',
                  )
 
     def __init__(self, init, repr, eq, order, unsafe_hash, frozen,
-                 match_args, kw_only, slots, weakref_slot):
+                 match_args, kw_only, slots, weakref_slot, cache):
         self.init = init
         self.repr = repr
         self.eq = eq
@@ -474,6 +571,7 @@ class _DataclassParams(object):
         self.kw_only = kw_only
         self.slots = slots
         self.weakref_slot = weakref_slot
+        self.cache = cache
 
     def __repr__(self):
         return ('_DataclassParams('
@@ -486,11 +584,12 @@ class _DataclassParams(object):
                 'match_args={6!r},'
                 'kw_only={7!r},'
                 'slots={8!r},'
-                'weakref_slot={9!r}'
+                'weakref_slot={9!r},'
+                'cache={10!r}'
                 ')').format(
             self.init, self.repr, self.eq, self.order,
             self.unsafe_hash, self.frozen, self.match_args,
-            self.kw_only, self.slots, self.weakref_slot)
+            self.kw_only, self.slots, self.weakref_slot, self.cache)
 
 
 def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
@@ -636,22 +735,16 @@ class _FuncBuilder(object):
             else:
                 class_qualname = cls.__qualname__
             fn.__qualname__ = '{0}.{1}'.format(class_qualname, fn.__name__)
+            fn.__dataclass_generated__ = True
 
             # Apply method annotations if they were stored
             if name in self.method_annotations:
                 annotation_fields, return_type = self.method_annotations[name]
 
-                # ann_field_names, ret_type = self.method_annotations[name]
                 # Set __annotate__ for PEP 649 deferred evaluation
                 if _annotationlib is not None:
-                    # Build field_annotations for __annotate__
-                    field_annotations = {}
-                    cls_annotations = getattr(cls, '__annotations__', OrderedDict())
-                    for field_name in annotation_fields:
-                        if field_name in cls_annotations:
-                            field_annotations[field_name] = cls_annotations[field_name]
                     fn.__annotate__ = _make_annotate_function(
-                        cls, name, annotation_fields, return_type, field_annotations=field_annotations)
+                        cls, name, annotation_fields, return_type)
                 else:
                     annotations = OrderedDict()
                     # Get the field types from the class annotations
@@ -844,8 +937,21 @@ def _frozen_get_del_attr(cls, fields, func_builder):
 
 
 def _is_classvar(a_type, typing):
-    return (a_type is typing.ClassVar or type(a_type) == type(typing.ClassVar)
-            or (hasattr(typing, 'get_origin') and typing.get_origin(a_type) is typing.ClassVar))
+    get_origin = getattr(typing, 'get_origin', None)
+
+    # Plain ClassVar.
+    is_plain_classvar = a_type is typing.ClassVar
+    # Python 3.8+ ClassVar[T].
+    is_parametrized_classvar = (
+        get_origin is not None
+        and get_origin(a_type) is typing.ClassVar)
+    # Python 2 typing backport ClassVar[T].
+    is_py2_backport_classvar = (
+        sys.version_info < (3,)
+        and type(a_type) == type(typing.ClassVar))
+    return (is_plain_classvar
+            or is_parametrized_classvar
+            or is_py2_backport_classvar)
 
 
 def _is_initvar(a_type, dataclasses):
@@ -972,6 +1078,47 @@ def _set_new_attribute(cls, name, value):
     return False
 
 
+class _GeneratedDataclassMethod(object):
+    """Descriptor for generated helpers that yields to same-named fields."""
+
+    def __init__(self, name, descriptor):
+        self.name = name
+        self.descriptor = descriptor
+
+    def __get__(self, obj, cls=None):
+        if cls is None:
+            cls = type(obj)
+        fields = getattr(cls, _FIELDS, None)
+        # A subclass may introduce a field after a base class generated this
+        # helper; let normal field access win in that case.
+        if fields is not None and self.name in fields:
+            raise AttributeError(self.name)
+        return self.descriptor.__get__(obj, cls)
+
+
+def _can_add_generated_method(cls, name, field_names):
+    # Generated helpers are optional; never shadow user fields or inherited API.
+    if name in field_names:
+        return False
+    for base in cls.__mro__:
+        if name in base.__dict__:
+            return False
+    return True
+
+
+def _check_generated_load_type_vars(cls, type_vars):
+    # Python 3 typing aliases proxy classmethod access to the origin class, so
+    # Box[int].load(...) arrives here as Box.load(...). Avoid silently accepting
+    # unresolved TypeVars. The generic marker attributes differ across typing
+    # runtimes, so probe them defensively.
+    if not type_vars and (
+            getattr(cls, '__parameters__', ()) or
+            getattr(cls, '__origin__', None) is not None):
+        raise TypeError(
+            "Generic dataclass classmethods require type_vars=...; "
+            "use load(cls[...], data) for parameterized aliases")
+
+
 def _hash_set_none(cls, fields, func_builder):
     cls.__hash__ = None
 
@@ -1062,8 +1209,51 @@ def attach_debug_function(cls, fname, f):
     cls.fn_bodies[fname] = f
 
 
+def _py2_reflected_method(other, name):
+    for cls in getattr(other.__class__, '__mro__', (other.__class__,)):
+        namespace = getattr(cls, '__dict__', {})
+        if name in namespace:
+            method = namespace[name]
+            if cls is object or getattr(method, '__dataclass_generated__', False):
+                return None
+            return getattr(other, name, None)
+    return None
+
+
+def _py2_reflected_eq(self, other):
+    method = _py2_reflected_method(other, '__eq__')
+    if method is None:
+        return False
+    result = method(self)
+    return False if result is NotImplemented else result
+
+
+def _py2_reflected_ne(self, other):
+    method = _py2_reflected_method(other, '__ne__')
+    if method is not None:
+        result = method(self)
+        if result is not NotImplemented:
+            return result
+
+    method = _py2_reflected_method(other, '__eq__')
+    if method is None:
+        return True
+    result = method(self)
+    return True if result is NotImplemented else not result
+
+
+def _py2_reflected_order(self, other, reflected_name, error_msg):
+    method = _py2_reflected_method(other, reflected_name)
+    if method is not None:
+        result = method(self)
+        if result is not NotImplemented:
+            return result
+    raise TypeError(error_msg.format(self.__class__.__name__,
+                                     other.__class__.__name__))
+
+
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
-                   match_args, kw_only, slots, weakref_slot):
+                   match_args, kw_only, slots, weakref_slot, cache):
     fields = OrderedDict()
 
     # Save reference to the built-in repr before it's shadowed by the parameter
@@ -1077,7 +1267,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     setattr(cls, _PARAMS, _DataclassParams(init, repr, eq, order,
                                            unsafe_hash, frozen,
                                            match_args, kw_only,
-                                           slots, weakref_slot))
+                                           slots, weakref_slot, cache))
 
     any_frozen_base = False
     all_frozen_bases = None
@@ -1218,6 +1408,63 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     _set_new_attribute(cls, '__replace__', _replace)
 
+    # Add load/loads classmethods and dump/dumps instance methods when they do
+    # not collide with user fields. Module-level functions always remain
+    # available for dataclasses with fields named load/dump/etc.
+    field_names = set(fields.keys())
+    if _can_add_generated_method(cls, 'load', field_names):
+        def _cls_load(klass, data, unknown=RAISE, strict_types=False,
+                      type_vars=None, collect_errors=False):
+            # type: (typing.Type[typing.Any], dict, str, bool, typing.Optional[dict], bool) -> typing.Any
+            _check_generated_load_type_vars(klass, type_vars)
+            return load(klass, data, unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        collect_errors=collect_errors)
+        _cls_load.__name__ = 'load'
+        _cls_load.__doc__ = 'Create an instance from a dictionary with type validation.'
+        _set_new_attribute(
+            cls, 'load',
+            _GeneratedDataclassMethod('load', classmethod(_cls_load)))
+
+    if _can_add_generated_method(cls, 'loads', field_names):
+        def _cls_loads(klass, payload, unknown=RAISE, strict_types=False,
+                       type_vars=None, collect_errors=False, serializer=None,
+                       **serializer_kwargs):
+            # type: (typing.Type[typing.Any], typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> typing.Any
+            _check_generated_load_type_vars(klass, type_vars)
+            return loads(klass, payload, unknown=unknown,
+                         strict_types=strict_types, type_vars=type_vars,
+                         collect_errors=collect_errors, serializer=serializer,
+                         **serializer_kwargs)
+        _cls_loads.__name__ = 'loads'
+        _cls_loads.__doc__ = 'Create an instance from serialized data with type validation.'
+        _set_new_attribute(
+            cls, 'loads',
+            _GeneratedDataclassMethod('loads', classmethod(_cls_loads)))
+
+    if _can_add_generated_method(cls, 'dump', field_names):
+        def _inst_dump(self, dict_factory=_default_dict_factory):
+            # type: (typing.Any, typing.Any) -> dict
+            return dump(self, dict_factory=dict_factory)
+        _inst_dump.__name__ = 'dump'
+        _inst_dump.__doc__ = 'Serialize this instance to a dictionary.'
+        _set_new_attribute(
+            cls, 'dump',
+            _GeneratedDataclassMethod('dump', _inst_dump))
+
+    if _can_add_generated_method(cls, 'dumps', field_names):
+        def _inst_dumps(self, dict_factory=_default_dict_factory,
+                        serializer=None, **serializer_kwargs):
+            # type: (typing.Any, typing.Any, typing.Any, **typing.Any) -> typing.Any
+            return dumps(
+                self, dict_factory=dict_factory, serializer=serializer,
+                **serializer_kwargs)
+        _inst_dumps.__name__ = 'dumps'
+        _inst_dumps.__doc__ = 'Serialize this instance with json or a custom serializer.'
+        _set_new_attribute(
+            cls, 'dumps',
+            _GeneratedDataclassMethod('dumps', _inst_dumps))
+
     # Get the fields as a list, and include only real fields.
     field_list = [f for f in fields.values() if f._field_type is _FIELD]
 
@@ -1258,13 +1505,37 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         cmp_fields = [field for field in field_list if field.compare]
         terms = ['self.{0}==other.{0}'.format(field.name) for field in cmp_fields]
         field_comparisons = ' and '.join(terms) or 'True'
+        if six.PY2 and not order:
+            not_equal_result = '__dataclass_py2_reflected_eq(self, other)'
+            eq_locals = {'__dataclass_py2_reflected_eq': _py2_reflected_eq}
+        else:
+            not_equal_result = 'NotImplemented'
+            eq_locals = None
         attach_debug_function(cls, *func_builder.add_fn('__eq__',
                                                         ('self', 'other'),
                                                         ['  if self is other:',
                                                          '   return True',
                                                          '  if other.__class__ is self.__class__:',
                                                          '   return {0}'.format(field_comparisons),
-                                                         '  return NotImplemented']))
+                                                         '  return {0}'.format(not_equal_result)],
+                                                        locals=eq_locals))
+        if six.PY2:
+            if not order:
+                ne_body = ['  if other.__class__ is not self.__class__:',
+                           '   return __dataclass_py2_reflected_ne(self, other)',
+                           '  result = self.__eq__(other)',
+                           '  return not result']
+                ne_locals = {'__dataclass_py2_reflected_ne': _py2_reflected_ne}
+            else:
+                ne_body = ['  result = self.__eq__(other)',
+                           '  if result is NotImplemented:',
+                           '   return __dataclass_py2_reflected_ne(self, other)',
+                           '  return not result']
+                ne_locals = {'__dataclass_py2_reflected_ne': _py2_reflected_ne}
+            attach_debug_function(cls, *func_builder.add_fn('__ne__',
+                                                            ('self', 'other'),
+                                                            ne_body,
+                                                            locals=ne_locals))
 
     if order:
         # Create and set the ordering methods.
@@ -1275,28 +1546,36 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
-            attach_debug_function(cls, *func_builder.add_fn(name,
-                                                            ('self', 'other'),
-                                                            ['  if other.__class__ is self.__class__:',
-                                                             '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
-                                                             '  return NotImplemented'],
-                                                            overwrite_error='Consider using functools.total_ordering'))
-    elif six.PY2 and eq:
-        # In Python 2, we need to explicitly prevent comparisons when order=False but eq=True
-        # In Python 3, this is automatic, but in Py2 objects can be compared by default
-        for name, op in [('__lt__', '<'),
-                         ('__le__', '<='),
-                         ('__gt__', '>'),
-                         ('__ge__', '>=')]:
-            error_msg = "'{}' not supported between instances of '{{1}}' and '{{0}}'".format(op)
-
-            body = [
-                "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
-            ]
+            reflected_name = {'__lt__': '__gt__',
+                              '__le__': '__ge__',
+                              '__gt__': '__lt__',
+                              '__ge__': '__le__'}[name]
+            body = ['  if other.__class__ is self.__class__:',
+                    '   return {0}{1}{2}'.format(self_tuple, op, other_tuple)]
+            if six.PY2:
+                error_msg = "'{}' not supported between instances of '{{0}}' and '{{1}}'".format(op)
+                body.append("  return __dataclass_py2_reflected_order(self, other, {!r}, {!r})".format(
+                    reflected_name, error_msg))
+                order_locals = {'__dataclass_py2_reflected_order': _py2_reflected_order}
+            else:
+                body.append('  return NotImplemented')
+                order_locals = None
             attach_debug_function(cls, *func_builder.add_fn(name,
                                                             ('self', 'other'),
                                                             body,
-                                                            overwrite_error=None))
+                                                            locals=order_locals,
+                                                            overwrite_error='Consider using functools.total_ordering'))
+    elif six.PY2 and eq:
+        # Python 2 otherwise falls back to arbitrary object ordering. Use
+        # __cmp__ so rich order methods still stay absent when order=False.
+        error_msg = "not supported between instances of '{0}' and '{1}'"
+        body = [
+            "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
+        ]
+        attach_debug_function(cls, *func_builder.add_fn('__cmp__',
+                                                        ('self', 'other'),
+                                                        body,
+                                                        overwrite_error=None))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)
@@ -1416,7 +1695,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # Add __annotate__ method for PEP 649 compatibility (Python 3.14+)
     if _annotationlib is not None:
         # Only add if not already present (allow custom implementations)
-        if not hasattr(cls, '__annotate__') or getattr(cls, '__annotate__', None) is None:
+        if getattr(cls, '__annotate__', None) is None:
             # Build list of field names for annotation
             annotation_field_names = [f.name for f in fields.values()]
             cls.__annotate__ = _make_annotate_function(
@@ -1694,7 +1973,7 @@ def annotate(__annotations__, **kwargs):
 
 def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
               unsafe_hash=False, frozen=False, match_args=True,
-              kw_only=False, slots=False, weakref_slot=False):
+              kw_only=False, slots=False, weakref_slot=False, cache=True):
     """Add dunder methods based on the fields defined in the class.
 
     Examines __annotations__ to determine fields.
@@ -1706,7 +1985,8 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     assigned to after instance creation. If match_args is true, the
     __match_args__ tuple is added. If kw_only is true, then by default
     all fields are keyword-only. If slots is true, a new class with a
-    __slots__ attribute is returned.
+    __slots__ attribute is returned. If cache is true, load/dump helper
+    metadata may be cached on the class for faster repeated operations.
     """
 
     # class F(object):
@@ -1723,7 +2003,7 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
             annotate(__annotations__={})(cls)
         return _process_class(cls, init, repr, eq, order, unsafe_hash,
                               frozen, match_args, kw_only, slots,
-                              weakref_slot)
+                              weakref_slot, cache)
 
     # See if we're being called as @dataclass or @dataclass().
     if cls is None:
@@ -1741,9 +2021,9 @@ def fields(class_or_instance):
     type Field.
     """
 
-    # Might it be worth caching this, per class?
+    cls = class_or_instance if isinstance(class_or_instance, type) else type(class_or_instance)
     try:
-        flds = getattr(class_or_instance, _FIELDS)
+        flds = getattr(cls, _FIELDS)
     except AttributeError:
         exc = TypeError('must be called with a dataclass type or instance')
         exc.__cause__ = None
@@ -1751,8 +2031,25 @@ def fields(class_or_instance):
             exc.__suppress_context__ = True
         raise exc
 
-    # Exclude pseudo-fields.
-    return tuple(f for f in flds.values() if f._field_type is _FIELD)
+    cache_enabled = _dataclass_cache_enabled(cls)
+    if cache_enabled:
+        try:
+            cached = cls.__dict__.get(_FIELDS_CACHE)
+        except (AttributeError, TypeError):
+            cached = None
+        if cached is not None:
+            return cached
+
+    # fields() is called for every nested dataclass during dump/asdict. When
+    # caching is enabled, keep the filtered tuple per class, but read
+    # cls.__dict__ directly so subclasses do not inherit a parent's field list.
+    real_fields = tuple(f for f in flds.values() if f._field_type is _FIELD)
+    if cache_enabled:
+        try:
+            setattr(cls, _FIELDS_CACHE, real_fields)
+        except (AttributeError, TypeError):
+            pass
+    return real_fields
 
 
 def _is_dataclass_instance(obj):
@@ -1803,12 +2100,21 @@ def _asdict_inner(obj, dict_factory):
         if dict_factory is dict:
             return {
                 f.name: _asdict_inner(getattr(obj, f.name), dict)
-                for f in fields(obj)
+                for f in fields(obj_type)
             }
+        elif dict_factory is OrderedDict:
+            # Python 2 uses OrderedDict by default to keep dataclass field order.
+            # Filling it directly avoids allocating a temporary list of pairs and
+            # running OrderedDict.update() for every nested dataclass object.
+            result = OrderedDict()
+            for f in fields(obj_type):
+                result[f.name] = _asdict_inner(
+                    getattr(obj, f.name), OrderedDict)
+            return result
         else:
             return dict_factory([
                 (f.name, _asdict_inner(getattr(obj, f.name), dict_factory))
-                for f in fields(obj)
+                for f in fields(obj_type)
             ])
     # handle the builtin types first for speed
     elif obj_type is list:
@@ -1923,6 +2229,7 @@ def make_dataclass(
         kw_only=False,  # type: bool
         slots=False,  # type: bool
         weakref_slot=False,  # type: bool
+        cache=True,  # type: bool
         module=None,  # type: typing.Optional[str],
         decorator=dataclass  # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
 ):
@@ -1934,6 +2241,8 @@ def make_dataclass(
     of either (name), (name, type) or (name, type, Field) objects. If type is
     omitted, use the string 'typing.Any'.  Field objects are created by
     the equivalent of calling 'field(name, type [, Field-info])'.
+    Pass cache=False to disable class-level helper caches on the created
+    dataclass.
 
       C = make_dataclass('C', ['x', ('y', int), ('z', int, field(init=False))], bases=(Base,))
 
@@ -2044,10 +2353,13 @@ def make_dataclass(
         cls.__module__ = module
 
     # Apply the decorator
-    cls = decorator(cls, init=init, repr=repr, eq=eq, order=order,
-                    unsafe_hash=unsafe_hash, frozen=frozen,
-                    match_args=match_args, kw_only=kw_only, slots=slots,
-                    weakref_slot=weakref_slot)
+    decorator_kwargs = dict(
+        init=init, repr=repr, eq=eq, order=order,
+        unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
+        kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
+    if cache is not True:
+        decorator_kwargs['cache'] = cache
+    cls = decorator(cls, **decorator_kwargs)
 
     # Unblock VALUE format AFTER decorator processing
     # (decorator's _process_class calls get_annotations which tries VALUE first)
@@ -2099,3 +2411,1399 @@ def _replace(self, **changes):
 
     # Create the new object
     return self.__class__(**changes)
+
+
+# ---------------------------------------------------------------------------
+# Validation and deserialization (load / loads / dump / dumps)
+# ---------------------------------------------------------------------------
+
+def _type_name(tp):
+    if isinstance(tp, type):
+        return tp.__name__
+    return repr(tp)
+
+
+def _unsupported_type_message(expected_type):
+    return "unsupported type annotation {0}".format(_type_name(expected_type))
+
+
+def _validate_unknown_option(unknown):
+    if unknown not in (RAISE, EXCLUDE):
+        raise ValueError(
+            "unknown must be {0!r} or {1!r}, got {2!r}".format(
+                RAISE, EXCLUDE, unknown))
+    return unknown
+
+
+_BOOL_TRUTHY = set(['t', 'true', 'on', 'y', 'yes', '1'])
+_BOOL_FALSY = set(['f', 'false', 'off', 'n', 'no', '0'])
+
+
+def _coerce_plain_value(value, expected_type, strict_types):
+    if expected_type is int:
+        if type(value) is bool:
+            raise TypeError("expected int, got bool")
+        if strict_types:
+            if not isinstance(value, six.integer_types):
+                raise TypeError("expected int, got {0}".format(type(value).__name__))
+            return value
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            raise TypeError(
+                "expected int, got {0} (value: {1!r})".format(
+                    type(value).__name__, value))
+
+    if expected_type is float:
+        if type(value) is bool:
+            raise TypeError("expected float, got bool")
+        if strict_types:
+            if type(value) is not float:
+                raise TypeError("expected float, got {0}".format(type(value).__name__))
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError, OverflowError):
+            raise TypeError(
+                "expected float, got {0} (value: {1!r})".format(
+                    type(value).__name__, value))
+
+    if expected_type is bool:
+        if strict_types:
+            if type(value) is not bool:
+                raise TypeError("expected bool, got {0}".format(type(value).__name__))
+            return value
+        if isinstance(value, six.string_types):
+            normalized = value.lower()
+            if normalized in _BOOL_TRUTHY:
+                return True
+            if normalized in _BOOL_FALSY:
+                return False
+        elif value == 1:
+            return True
+        elif value == 0:
+            return False
+        raise TypeError(
+            "expected bool, got {0} (value: {1!r})".format(
+                type(value).__name__, value))
+
+    if expected_type is str:
+        if sys.version_info < (3,):
+            if isinstance(value, basestring):
+                return value
+        else:
+            if isinstance(value, str):
+                return value
+            if not strict_types and isinstance(value, bytes):
+                try:
+                    return value.decode('utf-8')
+                except UnicodeDecodeError:
+                    raise TypeError("expected utf-8 bytes for str")
+        raise TypeError(
+            "expected str, got {0} (value: {1!r})".format(
+                type(value).__name__, value))
+
+    if not isinstance(value, expected_type):
+        raise TypeError(
+            "expected {0}, got {1} (value: {2!r})".format(
+                expected_type.__name__, type(value).__name__, value))
+    return value
+
+
+def _join_path(path, field_name):
+    if not isinstance(field_name, six.string_types):
+        field_name = repr(field_name)
+    if path:
+        return "{0}.{1}".format(path, field_name)
+    return field_name
+
+
+def _add_validation_issue(errors, path, message, expected=None, actual=None, value=None):
+    errors.append(ValidationIssue(path, message, expected, actual, value))
+
+
+def _merge_type_vars(base_type_vars, extra_type_vars):
+    # Preserve outer generic context when resolving nested dataclass aliases.
+    merged = {}
+    if base_type_vars:
+        merged.update(base_type_vars)
+    if extra_type_vars:
+        merged.update(extra_type_vars)
+    return merged or None
+
+
+def _dataclass_type_and_type_vars(expected_type, type_vars=None):
+    """Return (dataclass_cls, type_vars) for plain or parameterized dataclass types."""
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    # Parameterized dataclass alias, e.g. Box[int]. Use the origin class for
+    # construction and merge alias args into the current TypeVar context.
+    if isinstance(origin, type) and hasattr(origin, _FIELDS):
+        params = getattr(origin, '__parameters__', ()) or ()
+        alias_type_vars = {}
+        for param, arg in zip(params, args):
+            if isinstance(param, typing.TypeVar):
+                alias_type_vars[param] = _resolve_type(arg, type_vars)
+        return origin, _merge_type_vars(type_vars, alias_type_vars)
+
+    # Plain dataclass type, e.g. User.
+    if isinstance(expected_type, type) and hasattr(expected_type, _FIELDS):
+        return expected_type, type_vars
+
+    return None, type_vars
+
+
+_NO_LOAD_PLAN = object()
+_LOAD_PLAN_IDENTITY = object()
+_LOAD_PLAN_OPTIONAL = object()
+_LOAD_PLAN_PLAIN = object()
+_LOAD_PLAN_DATACLASS = object()
+_LOAD_PLAN_LIST = object()
+_LOAD_PLAN_DICT = object()
+_LOAD_PLAN_TUPLE = object()
+_LOAD_PLAN_VAR_TUPLE = object()
+_LOAD_PLAN_SET = object()
+_LOAD_FIELD_LOADABLE = object()
+_LOAD_FIELD_CLASSVAR = object()
+_LOAD_FIELD_INIT_FALSE = object()
+
+
+def _is_any_type(expected_type):
+    # In Python 2.7 typing backport, field() may store a different AnyMeta
+    # instance.
+    return expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta'
+
+
+def _contains_load_type_var(tp):
+    if isinstance(tp, typing.TypeVar):
+        return True
+    for arg in _get_type_args(tp):
+        if _contains_load_type_var(arg):
+            return True
+    return False
+
+
+def _type_vars_contain_load_type_var(type_vars):
+    if not type_vars:
+        return False
+    for tp in type_vars.values():
+        if _contains_load_type_var(tp):
+            return True
+    return False
+
+
+def _build_load_plan(expected_type):
+    if expected_type is None or expected_type is MISSING:
+        return (_LOAD_PLAN_IDENTITY, expected_type)
+
+    if isinstance(expected_type, typing.TypeVar):
+        return None
+
+    if _is_any_type(expected_type):
+        return (_LOAD_PLAN_IDENTITY, expected_type)
+
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        inner_plan = _build_load_plan(inner)
+        if inner_plan is None:
+            return None
+        return (_LOAD_PLAN_OPTIONAL, expected_type, inner_plan)
+
+    dataclass_type, nested_type_vars = _dataclass_type_and_type_vars(
+        expected_type, None)
+    if dataclass_type is not None:
+        if _type_vars_contain_load_type_var(nested_type_vars):
+            return None
+        return (
+            _LOAD_PLAN_DATACLASS, expected_type,
+            dataclass_type, nested_type_vars)
+
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        if _origin_is(origin, list):
+            if args:
+                item_plan = _build_load_plan(args[0])
+                if item_plan is None:
+                    return None
+                return (_LOAD_PLAN_LIST, expected_type, item_plan)
+            return (_LOAD_PLAN_LIST, expected_type, None)
+
+        if _origin_is(origin, dict):
+            if args and len(args) == 2:
+                key_plan = _build_load_plan(args[0])
+                value_plan = _build_load_plan(args[1])
+                if key_plan is None or value_plan is None:
+                    return None
+                return (
+                    _LOAD_PLAN_DICT, expected_type, key_plan, value_plan)
+            return (_LOAD_PLAN_DICT, expected_type, None, None)
+
+        if _origin_is(origin, tuple):
+            if args:
+                if len(args) == 2 and args[1] is Ellipsis:
+                    item_plan = _build_load_plan(args[0])
+                    if item_plan is None:
+                        return None
+                    return (_LOAD_PLAN_VAR_TUPLE, expected_type, item_plan)
+                item_plans = tuple(_build_load_plan(arg) for arg in args)
+                if any(plan is None for plan in item_plans):
+                    return None
+                return (_LOAD_PLAN_TUPLE, expected_type, args, item_plans)
+            return (_LOAD_PLAN_TUPLE, expected_type, (), ())
+
+        if _origin_is(origin, set):
+            if args:
+                item_plan = _build_load_plan(args[0])
+                if item_plan is None:
+                    return None
+                return (_LOAD_PLAN_SET, expected_type, item_plan)
+            return (_LOAD_PLAN_SET, expected_type, None)
+
+        return None
+
+    if isinstance(expected_type, type):
+        return (_LOAD_PLAN_PLAIN, expected_type)
+
+    return None
+
+
+def _validate_and_convert_plan(value, plan, field_name, path,
+                               unknown=RAISE, strict_types=False,
+                               create_instance=True):
+    kind = plan[0]
+    expected_type = plan[1]
+    full_path = _join_path(path, field_name)
+
+    if kind is _LOAD_PLAN_IDENTITY:
+        return value
+
+    if kind is _LOAD_PLAN_OPTIONAL:
+        if value is None:
+            return None
+        return _validate_and_convert_plan(
+            value, plan[2], field_name, path, unknown=unknown,
+            strict_types=strict_types, create_instance=create_instance)
+
+    if value is None:
+        if expected_type is type(None):
+            return None
+        raise TypeError(
+            "Field '{0}' expected {1}, got None".format(
+                full_path, expected_type))
+
+    if kind is _LOAD_PLAN_DATACLASS:
+        dataclass_type = plan[2]
+        nested_type_vars = plan[3]
+        if isinstance(value, dict):
+            return _load_inner(
+                dataclass_type, value, full_path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars,
+                create_instance=create_instance)
+        elif isinstance(value, dataclass_type):
+            return value
+        else:
+            raise TypeError(
+                "Field '{0}' expected dict or {1}, got {2}".format(
+                    full_path, dataclass_type.__name__, type(value).__name__))
+
+    if kind is _LOAD_PLAN_LIST:
+        if not isinstance(value, list):
+            raise TypeError(
+                "Field '{0}' expected list, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        if item_plan is not None:
+            return [
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, v in enumerate(value)
+            ]
+        return list(value)
+
+    if kind is _LOAD_PLAN_DICT:
+        if not isinstance(value, dict):
+            raise TypeError(
+                "Field '{0}' expected dict, got {1}".format(
+                    full_path, type(value).__name__))
+        key_plan = plan[2]
+        value_plan = plan[3]
+        if key_plan is not None and value_plan is not None:
+            result = {}
+            for k, v in value.items():
+                converted_key = _validate_and_convert_plan(
+                    k, key_plan, "{0}{{key}}".format(field_name), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                converted_value = _validate_and_convert_plan(
+                    v, value_plan, "{0}[{1}]".format(field_name, k), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                result[converted_key] = converted_value
+            return result
+        return dict(value)
+
+    if kind is _LOAD_PLAN_TUPLE:
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(
+                "Field '{0}' expected list or tuple, got {1}".format(
+                    full_path, type(value).__name__))
+        args = plan[2]
+        item_plans = plan[3]
+        if item_plans:
+            if len(args) != len(value):
+                raise TypeError(
+                    "Field '{0}' expected tuple of length {1}, got {2}".format(
+                        full_path, len(args), len(value)))
+            return tuple(
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, (v, item_plan) in enumerate(zip(value, item_plans)))
+        return tuple(value)
+
+    if kind is _LOAD_PLAN_VAR_TUPLE:
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(
+                "Field '{0}' expected list or tuple, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        return tuple(
+            _validate_and_convert_plan(
+                v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                unknown=unknown, strict_types=strict_types,
+                create_instance=create_instance)
+            for i, v in enumerate(value))
+
+    if kind is _LOAD_PLAN_SET:
+        if not isinstance(value, (list, set)):
+            raise TypeError(
+                "Field '{0}' expected list or set, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        if item_plan is not None:
+            return set(
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}{{{1}}}".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, v in enumerate(value))
+        return set(value)
+
+    if kind is _LOAD_PLAN_PLAIN:
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
+            raise TypeError(
+                "Field '{0}' {1}".format(full_path, exc))
+
+    return _validate_and_convert(
+        value, expected_type, field_name, path, unknown=unknown,
+        strict_types=strict_types, type_vars=None,
+        create_instance=create_instance)
+
+
+def _build_load_class_plan(cls):
+    all_fields = getattr(cls, _FIELDS)
+    known_names = set()
+    loadable_fields = []
+    ordered_entries = []
+    has_non_loadable = False
+
+    for f in all_fields.values():
+        known_names.add(f.name)
+        if f._field_type is _FIELD_CLASSVAR:
+            ordered_entries.append((_LOAD_FIELD_CLASSVAR, f))
+            has_non_loadable = True
+        elif not f.init:
+            ordered_entries.append((_LOAD_FIELD_INIT_FALSE, f))
+            has_non_loadable = True
+        else:
+            ordered_entries.append((_LOAD_FIELD_LOADABLE, f))
+            loadable_fields.append(f)
+
+    if not has_non_loadable:
+        ordered_entries = None
+    else:
+        ordered_entries = tuple(ordered_entries)
+    return frozenset(known_names), tuple(loadable_fields), ordered_entries
+
+
+def _load_class_plan_cached(cls):
+    if not _dataclass_cache_enabled(cls):
+        return _build_load_class_plan(cls)
+
+    try:
+        plan = cls.__dict__.get(_LOAD_CLASS_PLAN_CACHE)
+    except (AttributeError, TypeError):
+        plan = None
+    if plan is not None:
+        return plan
+
+    plan = _build_load_class_plan(cls)
+    try:
+        setattr(cls, _LOAD_CLASS_PLAN_CACHE, plan)
+    except (AttributeError, TypeError):
+        pass
+    return plan
+
+
+def _class_eval_namespace(cls):
+    module = sys.modules.get(getattr(cls, '__module__', None))
+    if module is not None:
+        globals_dict = dict(module.__dict__)
+    else:
+        globals_dict = {}
+        if isinstance(__builtins__, dict):
+            globals_dict.update(__builtins__)
+        else:
+            globals_dict.update(__builtins__.__dict__)
+    globals_dict.setdefault('typing', typing)
+
+    locals_dict = {}
+    try:
+        locals_dict.update(cls.__dict__)
+    except (AttributeError, TypeError):
+        pass
+    locals_dict.setdefault(getattr(cls, '__name__', ''), cls)
+    return globals_dict, locals_dict
+
+
+def _evaluate_load_annotation(cls, annotation):
+    if isinstance(annotation, str):
+        globals_dict, locals_dict = _class_eval_namespace(cls)
+        try:
+            return eval(annotation, globals_dict, locals_dict)
+        except (NameError, AttributeError, TypeError, SyntaxError):
+            return annotation
+
+    if hasattr(annotation, '__forward_arg__'):
+        return _evaluate_load_annotation(cls, annotation.__forward_arg__)
+
+    return annotation
+
+
+def _rebuild_generic_type(tp, origin, args):
+    if hasattr(tp, 'copy_with'):
+        try:
+            return tp.copy_with(tuple(args))
+        except TypeError:
+            pass
+    if origin is not None:
+        try:
+            if len(args) == 1:
+                return origin[args[0]]
+            return origin[tuple(args)]
+        except (AttributeError, TypeError):
+            pass
+    return tp
+
+
+def _resolve_load_type(cls, tp, type_vars=None):
+    if type_vars:
+        tp = _resolve_type(tp, type_vars)
+
+    resolved = _evaluate_load_annotation(cls, tp)
+    if resolved is not tp:
+        return _resolve_load_type(cls, resolved, type_vars=type_vars)
+    tp = resolved
+
+    origin = _get_type_origin(tp)
+    args = _get_type_args(tp)
+    if args:
+        new_args = tuple(_resolve_load_type(cls, arg, type_vars=type_vars)
+                         for arg in args)
+        if new_args != args:
+            return _rebuild_generic_type(tp, origin, new_args)
+    return tp
+
+
+def _validate_and_convert(value, expected_type, field_name, path,
+                          unknown=RAISE, strict_types=False, type_vars=None,
+                          create_instance=True):
+    """Validate that value matches expected_type and convert nested structures.
+
+    Returns the (possibly converted) value.
+    Raises TypeError with a descriptive message on type mismatch.
+    """
+    full_path = _join_path(path, field_name)
+
+    # No type annotation or MISSING -- skip validation
+    if expected_type is None or expected_type is MISSING:
+        return value
+
+    # Unresolved TypeVar -- validate bound/constraints if present, else accept anything
+    if isinstance(expected_type, typing.TypeVar):
+        bound = getattr(expected_type, '__bound__', None)
+        constraints = getattr(expected_type, '__constraints__', ())
+        if bound is not None:
+            return _validate_and_convert(
+                value, bound, field_name, path, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
+                create_instance=create_instance)
+        if constraints:
+            for ct in constraints:
+                try:
+                    return _validate_and_convert(
+                        value, ct, field_name, path, unknown=unknown,
+                        strict_types=strict_types, type_vars=type_vars,
+                        create_instance=create_instance)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any constraint of {2}".format(
+                    full_path, value, expected_type))
+        return value
+
+    # typing.Any -- accept anything
+    # In Python 2.7 typing backport, field() may store a different AnyMeta instance
+    if expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta':
+        return value
+
+    # Handle None value
+    if value is None:
+        inner = _is_optional(expected_type)
+        if inner is not None or expected_type is type(None):
+            return None
+        raise TypeError(
+            "Field '{0}' expected {1}, got None".format(full_path, expected_type))
+
+    # Unwrap Optional[X] -> X (None was already handled above)
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        expected_type = inner
+
+    # Nested dataclass -- convert dict to instance recursively. This handles
+    # both plain dataclass types and parameterized aliases such as Box[int].
+    dataclass_type, nested_type_vars = _dataclass_type_and_type_vars(
+        expected_type, type_vars)
+    if dataclass_type is not None:
+        if isinstance(value, dict):
+            return _load_inner(
+                dataclass_type, value, full_path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars,
+                create_instance=create_instance)
+        elif isinstance(value, dataclass_type):
+            return value
+        else:
+            raise TypeError(
+                "Field '{0}' expected dict or {1}, got {2}".format(
+                    full_path, dataclass_type.__name__, type(value).__name__))
+
+    # Generic types
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        # List[X]
+        if _origin_is(origin, list):
+            if not isinstance(value, list):
+                raise TypeError(
+                    "Field '{0}' expected list, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return [
+                    _validate_and_convert(
+                        v, args[0], "{0}[{1}]".format(field_name, i), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, v in enumerate(value)
+                ]
+            return list(value)
+
+        # Dict[K, V]
+        if _origin_is(origin, dict):
+            if not isinstance(value, dict):
+                raise TypeError(
+                    "Field '{0}' expected dict, got {1}".format(
+                        full_path, type(value).__name__))
+            if args and len(args) == 2:
+                return {
+                    _validate_and_convert(
+                        k, args[0], "{0}{{key}}".format(field_name), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance):
+                    _validate_and_convert(
+                        v, args[1], "{0}[{1}]".format(field_name, k), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for k, v in value.items()
+                }
+            return dict(value)
+
+        # Tuple[X, Y, ...]
+        if _origin_is(origin, tuple):
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(
+                    "Field '{0}' expected list or tuple, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                if len(args) == 2 and args[1] is Ellipsis:
+                    return tuple(
+                        _validate_and_convert(
+                            v, args[0], "{0}[{1}]".format(field_name, i), path,
+                            unknown=unknown, strict_types=strict_types,
+                            type_vars=type_vars,
+                            create_instance=create_instance)
+                        for i, v in enumerate(value))
+                if len(args) != len(value):
+                    raise TypeError(
+                        "Field '{0}' expected tuple of length {1}, got {2}".format(
+                            full_path, len(args), len(value)))
+                return tuple(
+                    _validate_and_convert(
+                        v, t, "{0}[{1}]".format(field_name, i), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, (v, t) in enumerate(zip(value, args)))
+            return tuple(value)
+
+        # Set[X]
+        if _origin_is(origin, set):
+            if not isinstance(value, (list, set)):
+                raise TypeError(
+                    "Field '{0}' expected list or set, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return set(
+                    _validate_and_convert(
+                        v, args[0], "{0}{{{1}}}".format(field_name, i), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, v in enumerate(value))
+            return set(value)
+
+        # Union[X, Y, ...] (non-Optional, since Optional was handled above)
+        if origin is typing.Union:
+            for variant in args:
+                try:
+                    return _validate_and_convert(
+                        value, variant, field_name, path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                except (TypeError, ValueError):
+                    continue
+            raise TypeError(
+                "Field '{0}' value {1!r} does not match any variant of {2}".format(
+                    full_path, value, expected_type))
+
+        raise TypeError(
+            "Field '{0}' has {1}".format(
+                full_path, _unsupported_type_message(expected_type)))
+
+    # Plain types (int, str, float, bool, etc.)
+    if isinstance(expected_type, type):
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
+            raise TypeError(
+                "Field '{0}' {1}".format(full_path, exc))
+
+    raise TypeError(
+        "Field '{0}' has {1}".format(
+            full_path, _unsupported_type_message(expected_type)))
+
+
+def _validate_and_convert_collect(value, expected_type, path, errors,
+                                  unknown=RAISE, strict_types=False,
+                                  type_vars=None, create_instance=True):
+    """Validate value and collect every issue reachable from this value."""
+    # Keep this separate from _validate_and_convert: collect mode has different
+    # control flow for partial containers, Union trial errors, and nested objects.
+    # No type annotation or MISSING -- skip validation
+    if expected_type is None or expected_type is MISSING:
+        return value
+
+    # Unresolved TypeVar -- validate bound/constraints if present, else accept anything
+    if isinstance(expected_type, typing.TypeVar):
+        bound = getattr(expected_type, '__bound__', None)
+        constraints = getattr(expected_type, '__constraints__', ())
+        if bound is not None:
+            return _validate_and_convert_collect(
+                value, bound, path, errors, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
+                create_instance=create_instance)
+        if constraints:
+            for ct in constraints:
+                trial_errors = []
+                converted = _validate_and_convert_collect(
+                    value, ct, path, trial_errors, unknown=unknown,
+                    strict_types=strict_types, type_vars=type_vars,
+                    create_instance=create_instance)
+                if not trial_errors:
+                    return converted
+            _add_validation_issue(
+                errors, path,
+                "value {0!r} does not match any constraint of {1}".format(
+                    value, expected_type),
+                expected_type, type(value).__name__, value)
+            return value
+        return value
+
+    # typing.Any -- accept anything
+    if expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta':
+        return value
+
+    # Handle None value
+    if value is None:
+        inner = _is_optional(expected_type)
+        if inner is not None or expected_type is type(None):
+            return None
+        _add_validation_issue(
+            errors, path,
+            "expected {0}, got None".format(_type_name(expected_type)),
+            expected_type, 'None', value)
+        return value
+
+    # Unwrap Optional[X] -> X (None was already handled above)
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        expected_type = inner
+
+    # Nested dataclass -- convert dict to instance recursively. This handles
+    # both plain dataclass types and parameterized aliases such as Box[int].
+    dataclass_type, nested_type_vars = _dataclass_type_and_type_vars(
+        expected_type, type_vars)
+    if dataclass_type is not None:
+        if isinstance(value, dict):
+            return _load_inner_collect(
+                dataclass_type, value, path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars, errors=errors,
+                create_instance=create_instance)
+        elif isinstance(value, dataclass_type):
+            return value
+        else:
+            _add_validation_issue(
+                errors, path,
+                "expected dict or {0}, got {1}".format(
+                    dataclass_type.__name__, type(value).__name__),
+                dataclass_type, type(value).__name__, value)
+            return value
+
+    # Generic types
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        # List[X]
+        if _origin_is(origin, list):
+            if not isinstance(value, list):
+                _add_validation_issue(
+                    errors, path,
+                    "expected list, got {0}".format(type(value).__name__),
+                    list, type(value).__name__, value)
+                return value
+            if args:
+                return [
+                    _validate_and_convert_collect(
+                        v, args[0], "{0}[{1}]".format(path, i), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, v in enumerate(value)
+                ]
+            return list(value)
+
+        # Dict[K, V]
+        if _origin_is(origin, dict):
+            if not isinstance(value, dict):
+                _add_validation_issue(
+                    errors, path,
+                    "expected dict, got {0}".format(type(value).__name__),
+                    dict, type(value).__name__, value)
+                return value
+            if args and len(args) == 2:
+                result = {}
+                for k, v in value.items():
+                    item_start = len(errors)
+                    converted_key = _validate_and_convert_collect(
+                        k, args[0], "{0}{{key}}".format(path), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    converted_value = _validate_and_convert_collect(
+                        v, args[1], "{0}[{1}]".format(path, k), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    if len(errors) == item_start:
+                        result[converted_key] = converted_value
+                return result
+            return dict(value)
+
+        # Tuple[X, Y, ...]
+        if _origin_is(origin, tuple):
+            if not isinstance(value, (list, tuple)):
+                _add_validation_issue(
+                    errors, path,
+                    "expected list or tuple, got {0}".format(type(value).__name__),
+                    tuple, type(value).__name__, value)
+                return value
+            if args:
+                if len(args) == 2 and args[1] is Ellipsis:
+                    return tuple(
+                        _validate_and_convert_collect(
+                            v, args[0], "{0}[{1}]".format(path, i), errors,
+                            unknown=unknown, strict_types=strict_types,
+                            type_vars=type_vars,
+                            create_instance=create_instance)
+                        for i, v in enumerate(value))
+                if len(args) != len(value):
+                    _add_validation_issue(
+                        errors, path,
+                        "expected tuple of length {0}, got {1}".format(
+                            len(args), len(value)),
+                        'tuple length {0}'.format(len(args)), len(value), value)
+                return tuple(
+                    _validate_and_convert_collect(
+                        v, t, "{0}[{1}]".format(path, i), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, (v, t) in enumerate(zip(value, args)))
+            return tuple(value)
+
+        # Set[X]
+        if _origin_is(origin, set):
+            if not isinstance(value, (list, set)):
+                _add_validation_issue(
+                    errors, path,
+                    "expected list or set, got {0}".format(type(value).__name__),
+                    set, type(value).__name__, value)
+                return value
+            if args:
+                result = set()
+                for i, v in enumerate(value):
+                    item_start = len(errors)
+                    converted = _validate_and_convert_collect(
+                        v, args[0], "{0}{{{1}}}".format(path, i), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    if len(errors) == item_start:
+                        try:
+                            result.add(converted)
+                        except TypeError:
+                            _add_validation_issue(
+                                errors, "{0}{{{1}}}".format(path, i),
+                                "expected hashable set item, got {0}".format(
+                                    type(converted).__name__),
+                                'hashable', type(converted).__name__, converted)
+                return result
+            return set(value)
+
+        # Union[X, Y, ...] (non-Optional, since Optional was handled above)
+        if origin is typing.Union:
+            for variant in args:
+                trial_errors = []
+                converted = _validate_and_convert_collect(
+                    value, variant, path, trial_errors,
+                    unknown=unknown, strict_types=strict_types,
+                    type_vars=type_vars,
+                    create_instance=create_instance)
+                if not trial_errors:
+                    return converted
+            _add_validation_issue(
+                errors, path,
+                "value {0!r} does not match any variant of {1}".format(
+                    value, expected_type),
+                expected_type, type(value).__name__, value)
+            return value
+
+        _add_validation_issue(
+            errors, path, _unsupported_type_message(expected_type),
+            expected_type, type(value).__name__, value)
+        return value
+
+    # Plain types (int, str, float, bool, etc.)
+    if isinstance(expected_type, type):
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
+            _add_validation_issue(
+                errors, path, str(exc),
+                expected_type, type(value).__name__, value)
+            return value
+
+    _add_validation_issue(
+        errors, path, _unsupported_type_message(expected_type),
+        expected_type, type(value).__name__, value)
+    return value
+
+
+def _field_owner(cls, field_obj):
+    for base in reversed(cls.__mro__[:-1]):
+        base_fields = getattr(base, _FIELDS, None)
+        if base_fields is not None and base_fields.get(field_obj.name) is field_obj:
+            return base
+    return cls
+
+
+def _typed_bases(cls):
+    orig_bases = list(getattr(cls, '__orig_bases__', ()) or ())
+    if not orig_bases:
+        return list(getattr(cls, '__bases__', ()) or ())
+
+    bases = list(orig_bases)
+    origins = set()
+    for base in orig_bases:
+        origin = _get_type_origin(base)
+        if origin is not None:
+            origins.add(origin)
+        elif isinstance(base, type):
+            origins.add(base)
+
+    for base in getattr(cls, '__bases__', ()):
+        if base not in origins:
+            bases.append(base)
+    return bases
+
+
+def _type_vars_for_base(cls, target, type_vars=None):
+    found, resolved = _type_vars_for_base_inner(
+        cls, target, type_vars or {}, set())
+    if found:
+        return resolved or None
+    return type_vars
+
+
+def _type_vars_for_base_inner(cls, target, type_vars, seen):
+    if cls is target:
+        return True, dict(type_vars)
+    if cls in seen:
+        return False, None
+    seen = set(seen)
+    seen.add(cls)
+
+    for base in _typed_bases(cls):
+        origin = _get_type_origin(base)
+        args = _get_type_args(base)
+        if origin is None:
+            if not isinstance(base, type):
+                continue
+            origin = base
+            args = ()
+        if not isinstance(origin, type):
+            continue
+
+        params = getattr(origin, '__parameters__', ()) or ()
+        next_type_vars = {}
+        if params and args:
+            for param, arg in zip(params, args):
+                if isinstance(param, typing.TypeVar):
+                    next_type_vars[param] = _resolve_load_type(
+                        cls, arg, type_vars=type_vars)
+
+        found, resolved = _type_vars_for_base_inner(
+            origin, target, next_type_vars, seen)
+        if found:
+            return True, resolved
+
+    return False, None
+
+
+def _field_type_vars_for_load(cls, owner, type_vars=None):
+    cls_params = getattr(cls, '__parameters__', ()) or ()
+    if type_vars and cls_params:
+        current_type_vars = {}
+        final_overrides = {}
+        for param, arg in type_vars.items():
+            if param in cls_params:
+                current_type_vars[param] = arg
+            else:
+                final_overrides[param] = arg
+    else:
+        current_type_vars = None
+        final_overrides = type_vars
+
+    field_type_vars = _type_vars_for_base(cls, owner, current_type_vars)
+    return _merge_type_vars(field_type_vars, final_overrides)
+
+
+def _field_type_for_load(cls, f, type_vars=None):
+    owner = _field_owner(cls, f)
+    field_type_vars = _field_type_vars_for_load(cls, owner, type_vars)
+
+    # For InitVar fields, extract the inner type for validation
+    field_type = _resolve_load_type(owner, f.type, type_vars=field_type_vars)
+    if f._field_type is _FIELD_INITVAR:
+        if isinstance(field_type, InitVar):
+            field_type = field_type.type
+        elif isinstance(field_type, type) and issubclass(field_type, InitVar):
+            # Older InitVar implementations stored the inner type on __parameters__.
+            field_type = getattr(field_type, '__parameters__', None) or field_type
+    return _resolve_load_type(owner, field_type, type_vars=field_type_vars)
+
+
+def _field_type_for_load_cached(cls, f, type_vars=None):
+    if type_vars is not None or not _dataclass_cache_enabled(cls):
+        return _field_type_for_load(cls, f, type_vars=type_vars)
+
+    try:
+        cache = cls.__dict__.get(_LOAD_FIELD_TYPE_CACHE)
+    except (AttributeError, TypeError):
+        cache = None
+    if cache is None:
+        cache = {}
+        try:
+            setattr(cls, _LOAD_FIELD_TYPE_CACHE, cache)
+        except (AttributeError, TypeError):
+            return _field_type_for_load(cls, f, type_vars=None)
+
+    try:
+        return cache[f.name]
+    except KeyError:
+        field_type = _field_type_for_load(cls, f, type_vars=None)
+        if not _has_unresolved_load_annotation(field_type):
+            cache[f.name] = field_type
+        return field_type
+
+
+def _field_load_plan_cached(cls, f, field_type, type_vars=None):
+    if type_vars is not None or not _dataclass_cache_enabled(cls):
+        return None
+    if _has_unresolved_load_annotation(field_type):
+        return None
+
+    try:
+        cache = cls.__dict__.get(_LOAD_FIELD_PLAN_CACHE)
+    except (AttributeError, TypeError):
+        cache = None
+    if cache is None:
+        cache = {}
+        try:
+            setattr(cls, _LOAD_FIELD_PLAN_CACHE, cache)
+        except (AttributeError, TypeError):
+            return None
+
+    try:
+        plan = cache[f.name]
+    except KeyError:
+        plan = _build_load_plan(field_type)
+        cache[f.name] = plan if plan is not None else _NO_LOAD_PLAN
+    if plan is _NO_LOAD_PLAN:
+        return None
+    return plan
+
+
+def _has_unresolved_load_annotation(tp):
+    if isinstance(tp, str):
+        return True
+    if hasattr(tp, '__forward_arg__'):
+        return True
+    for arg in _get_type_args(tp):
+        if _has_unresolved_load_annotation(arg):
+            return True
+    return False
+
+
+def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
+                type_vars=None, create_instance=True):
+    """Recursively validate a dict and optionally construct a dataclass instance."""
+    if not isinstance(data, dict):
+        raise TypeError(
+            "Expected dict for {0}, got {1}".format(
+                cls.__name__, type(data).__name__))
+
+    known_keys, loadable_fields, ordered_entries = _load_class_plan_cached(cls)
+    kwargs = {}
+
+    if ordered_entries is None:
+        for f in loadable_fields:
+            field_type = _field_type_for_load_cached(
+                cls, f, type_vars=type_vars)
+
+            if f.name in data:
+                value = data[f.name]
+                field_plan = _field_load_plan_cached(
+                    cls, f, field_type, type_vars=type_vars)
+                if field_plan is not None:
+                    converted = _validate_and_convert_plan(
+                        value, field_plan, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        create_instance=create_instance)
+                else:
+                    converted = _validate_and_convert(
+                        value, field_type, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        type_vars=type_vars, create_instance=create_instance)
+                if create_instance:
+                    kwargs[f.name] = converted
+            else:
+                # Use default or raise
+                if f.default is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default
+                elif f.default_factory is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default_factory()
+                else:
+                    raise ValueError(
+                        "Missing required field '{0}' for {1}".format(
+                            _join_path(path, f.name), cls.__name__))
+    else:
+        for kind, f in ordered_entries:
+            # Skip ClassVar fields; they are known but cannot be loaded.
+            if kind is _LOAD_FIELD_CLASSVAR:
+                if unknown == RAISE and f.name in data:
+                    raise TypeError(
+                        "Field '{0}' is ClassVar and cannot be loaded".format(
+                            _join_path(path, f.name)))
+                continue
+
+            # Skip init=False fields
+            if kind is _LOAD_FIELD_INIT_FALSE:
+                if unknown == RAISE and f.name in data:
+                    raise TypeError(
+                        "Field '{0}' has init=False and cannot be loaded".format(
+                            _join_path(path, f.name)))
+                continue
+
+            field_type = _field_type_for_load_cached(
+                cls, f, type_vars=type_vars)
+
+            if f.name in data:
+                value = data[f.name]
+                field_plan = _field_load_plan_cached(
+                    cls, f, field_type, type_vars=type_vars)
+                if field_plan is not None:
+                    converted = _validate_and_convert_plan(
+                        value, field_plan, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        create_instance=create_instance)
+                else:
+                    converted = _validate_and_convert(
+                        value, field_type, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        type_vars=type_vars, create_instance=create_instance)
+                if create_instance:
+                    kwargs[f.name] = converted
+            else:
+                # Use default or raise
+                if f.default is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default
+                elif f.default_factory is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default_factory()
+                else:
+                    raise ValueError(
+                        "Missing required field '{0}' for {1}".format(
+                            _join_path(path, f.name), cls.__name__))
+
+    # Check for unknown keys
+    if unknown == RAISE:
+        extra = set(data.keys()) - known_keys
+        if extra:
+            raise TypeError(
+                "Unknown fields for {0}: {1}".format(
+                    cls.__name__,
+                    ', '.join(
+                        _join_path(path, name)
+                        for name in sorted(extra, key=repr))))
+
+    if create_instance:
+        return cls(**kwargs)
+    return True
+
+
+def _load_inner_collect(cls, data, path="", unknown=RAISE,
+                        strict_types=False, type_vars=None, errors=None,
+                        create_instance=True):
+    """Recursively validate a dict while collecting validation issues."""
+    # Keep this separate from _load_inner: collect mode must keep walking after
+    # field errors, then avoid constructing partially invalid dataclass objects.
+    if errors is None:
+        errors = []
+    start_errors = len(errors)
+
+    if not isinstance(data, dict):
+        _add_validation_issue(
+            errors, path,
+            "expected dict for {0}, got {1}".format(
+                cls.__name__, type(data).__name__),
+            dict, type(data).__name__, data)
+        return None
+
+    all_fields = getattr(cls, _FIELDS)
+    kwargs = {}
+    known_keys = set()
+
+    for f in all_fields.values():
+        field_path = _join_path(path, f.name)
+
+        # Skip ClassVar fields; they are known but cannot be loaded.
+        if f._field_type is _FIELD_CLASSVAR:
+            if unknown == RAISE and f.name in data:
+                _add_validation_issue(
+                    errors, field_path,
+                    "is ClassVar and cannot be loaded",
+                    None, type(data[f.name]).__name__, data[f.name])
+            known_keys.add(f.name)
+            continue
+
+        # Skip init=False fields
+        if not f.init:
+            if unknown == RAISE and f.name in data:
+                _add_validation_issue(
+                    errors, field_path,
+                    "has init=False and cannot be loaded",
+                    None, type(data[f.name]).__name__, data[f.name])
+            known_keys.add(f.name)
+            continue
+
+        known_keys.add(f.name)
+        field_type = _field_type_for_load_cached(
+            cls, f, type_vars=type_vars)
+
+        if f.name in data:
+            converted = _validate_and_convert_collect(
+                data[f.name], field_type, field_path, errors, unknown=unknown,
+                strict_types=strict_types, type_vars=type_vars,
+                create_instance=create_instance)
+            if create_instance:
+                kwargs[f.name] = converted
+        else:
+            # Use default or collect missing-field issue
+            if f.default is not MISSING:
+                if create_instance:
+                    kwargs[f.name] = f.default
+            elif f.default_factory is not MISSING:
+                if create_instance:
+                    kwargs[f.name] = f.default_factory()
+            else:
+                _add_validation_issue(
+                    errors, field_path,
+                    "missing required field for {0}".format(cls.__name__),
+                    f.type, 'missing', MISSING)
+
+    # Check for unknown keys
+    if unknown == RAISE:
+        extra = set(data.keys()) - known_keys
+        for name in sorted(extra, key=repr):
+            _add_validation_issue(
+                errors, _join_path(path, name),
+                "unknown field for {0}".format(cls.__name__),
+                None, type(data[name]).__name__, data[name])
+
+    if len(errors) > start_errors:
+        return None
+
+    if create_instance:
+        return cls(**kwargs)
+    return True
+
+
+def load(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
+         collect_errors=False):
+    # type: (typing.Any, dict, str, bool, typing.Optional[dict], bool) -> typing.Any
+    """Create a dataclass instance from a dictionary with type validation.
+
+    Args:
+        cls: A dataclass class or parameterized dataclass alias.
+        data: A dictionary mapping field names to values.
+        unknown: RAISE to reject unknown/non-loadable keys, EXCLUDE to ignore them.
+        strict_types: If True, disable marshmallow-style scalar coercion.
+        type_vars: Optional dict mapping TypeVars to concrete types,
+            e.g. {T: int} to resolve generic fields.
+        collect_errors: If True, collect all validation issues and raise
+            ValidationError instead of failing on the first issue.
+
+    Returns:
+        An instance of cls.
+
+    Raises:
+        TypeError: If cls is not a dataclass, data is not a dict, or type validation fails.
+        ValueError: If required fields are missing.
+        ValidationError: If collect_errors=True and validation fails.
+    """
+    unknown = _validate_unknown_option(unknown)
+    cls, type_vars = _dataclass_type_and_type_vars(cls, type_vars)
+    if cls is None:
+        raise TypeError("load() should be called on a dataclass type")
+    if collect_errors:
+        errors = []
+        obj = _load_inner_collect(
+            cls, data, unknown=unknown, strict_types=strict_types,
+            type_vars=type_vars, errors=errors)
+        if errors:
+            raise ValidationError(errors)
+        return obj
+    return _load_inner(
+        cls, data, unknown=unknown, strict_types=strict_types,
+        type_vars=type_vars)
+
+
+def _serializer_or_json(serializer):
+    if serializer is None:
+        import json as _json
+        return _json
+    return serializer
+
+
+def loads(cls, payload, unknown=RAISE, strict_types=False, type_vars=None,
+          collect_errors=False, serializer=None, **serializer_kwargs):
+    # type: (typing.Any, typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> typing.Any
+    """Create a dataclass instance from serialized data with type validation."""
+    data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
+    return load(cls, data, unknown=unknown, strict_types=strict_types,
+                type_vars=type_vars, collect_errors=collect_errors)
+
+
+def dump(obj, dict_factory=_default_dict_factory):
+    # type: (typing.Any, typing.Any) -> dict
+    """Serialize a dataclass instance to a dictionary. Wrapper around asdict()."""
+    return asdict(obj, dict_factory=dict_factory)
+
+
+def dumps(obj, dict_factory=_default_dict_factory, serializer=None,
+          **serializer_kwargs):
+    # type: (typing.Any, typing.Any, typing.Any, **typing.Any) -> typing.Any
+    """Serialize a dataclass instance with json or a custom serializer."""
+    return _serializer_or_json(serializer).dumps(
+        dump(obj, dict_factory=dict_factory), **serializer_kwargs)
+
+
+def validate(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
+             collect_errors=False):
+    # type: (typing.Any, dict, str, bool, typing.Optional[dict], bool) -> bool
+    """Validate a dictionary against a dataclass schema without creating an instance."""
+    unknown = _validate_unknown_option(unknown)
+    cls, type_vars = _dataclass_type_and_type_vars(cls, type_vars)
+    if cls is None:
+        raise TypeError("validate() should be called on a dataclass type")
+    if collect_errors:
+        errors = []
+        _load_inner_collect(
+            cls, data, unknown=unknown, strict_types=strict_types,
+            type_vars=type_vars, errors=errors,
+            create_instance=False)
+        if errors:
+            raise ValidationError(errors)
+        return True
+    _load_inner(
+        cls, data, unknown=unknown, strict_types=strict_types,
+        type_vars=type_vars,
+        create_instance=False)
+    return True
+
+
+def validates(cls, payload, unknown=RAISE, strict_types=False,
+              type_vars=None, collect_errors=False, serializer=None,
+              **serializer_kwargs):
+    # type: (typing.Any, typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> bool
+    """Validate serialized data against a dataclass schema without creating an instance."""
+    data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
+    return validate(cls, data, unknown=unknown, strict_types=strict_types,
+                    type_vars=type_vars, collect_errors=collect_errors)

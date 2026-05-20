@@ -1,6 +1,8 @@
 name: Test
 
-on: [push]
+on:
+  push:
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -8,6 +10,8 @@ concurrency:
 env:
   # Setting an environment variable with the value of a configuration variable
   GIST_STORAGE: ${{ vars.GIST_STORAGE }}
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  GIST_RW: ${{ secrets.GIST_RW }}
 jobs:
   build:
     strategy:
@@ -19,26 +23,43 @@ jobs:
             container:
               image: coatldev/six:latest
             tox-env: "test_ported_on_portedlib_py27"
+          - python-version: "2.7"
+            os: ubuntu-latest
+            suffix: "2"
+            container:
+              image: coatldev/six:latest
+            tox-env: "test_load_py27"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_native_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
+            container: python:3.14
+            tox-env: "test_load_py314"
+          - python-version: "3.14"
+            os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_ported_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_ported_on_nativelib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_native_on_nativelib"
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v5
+      - name: Trust checkout directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Setup Python
         if: matrix.python-version != '2.7'
         uses: actions/setup-python@v5
@@ -52,23 +73,31 @@ jobs:
       - name: Install tox and coverage
         run: python${{ matrix.suffix }} -m pip install tox coverage
       - name: Run tox
+        id: tox
         run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
-        continue-on-error: true
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' && hashFiles(format('{0}-coverage.xml', matrix.tox-env)) != '' }}
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ matrix.tox-env }}.xml
+          token: ${{ env.CODECOV_TOKEN }}
+          files: ${{ matrix.tox-env }}-coverage.xml
           name: ${{ matrix.tox-env }}
           flags: ${{ matrix.tox-env }}
           slug: nev3rfail/py2dataclasses
       - name: Process test XML
         id: processed_json
         run: |
-          echo "json<<EOF" >> $GITHUB_OUTPUT
-          python${{ matrix.suffix }} -m tests._xmlprocessor < ${{ matrix.tox-env }}.xml >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          if [ ! -f "${{ matrix.tox-env }}.xml" ]; then
+            echo "::error::Missing test XML for ${{ matrix.tox-env }}"
+            exit 1
+          fi
+          python${{ matrix.suffix }} -m tests._xmlprocessor < "${{ matrix.tox-env }}.xml" > processed.json
+
+          {
+            echo "json<<EOF"
+            cat processed.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
 #      - name: Update gist
 #        uses: gorgbus/gist-actions@main
@@ -106,8 +135,9 @@ jobs:
       - uses: Wandalen/wretry.action@master
         id: uploadit
         name: Upload badge
+        if: ${{ github.event_name == 'push' && env.GIST_RW != '' && env.GIST_STORAGE != '' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
+          GITHUB_TOKEN: ${{ env.GIST_RW }}
         with:
           action: gorgbus/gist-actions@main
           attempt_limit: 10

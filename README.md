@@ -67,6 +67,32 @@ assert is_dataclass(person)
 
 More examples [here](PYTHON2_USAGE.md).
 
+`loads()` / `dumps()` use `json` by default and can use any serializer module
+with `loads()` / `dumps()` functions:
+
+```python
+import msgpack
+from dataclasses import dumps, loads
+
+payload = dumps(Point(3, 4), serializer=msgpack, use_bin_type=True)
+point = loads(Point, payload, serializer=msgpack, raw=False)
+```
+
+`load()` / `loads()` reject unknown input keys by default. Pass
+`unknown=EXCLUDE` to ignore unknown, `ClassVar`, or `init=False` input keys.
+Scalar fields use marshmallow-style coercion by default; pass
+`strict_types=True` to require values to already match their annotated runtime
+types. `dump()` / `dumps()` serialize the current dataclass instance and do not
+run load-time validation.
+
+Dataclass helper caches are enabled by default with `@dataclass(cache=True)`.
+The repeated `load()` / `loads()` / `validate()` / `validates()` / `dump()` /
+`dumps()` path reuses resolved field metadata for better performance. Classes
+that intentionally update field definitions, field types, `__annotations__`,
+`__dataclass_fields__`, or `ClassVar` / `init=False` metadata at runtime can opt
+out per class with `@dataclass(cache=False)` or
+`make_dataclass(..., cache=False)`.
+
 
 ## Development
 
@@ -102,5 +128,3 @@ More examples [here](PYTHON2_USAGE.md).
 
 ### ⚠ WARNING
 * Please, do not use Python 2.7 in 2026
-
-
