@@ -1374,8 +1374,11 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
             _GeneratedDataclassMethod('dump', _inst_dump))
 
     if _can_add_generated_method(cls, 'dumps', field_names):
-        def _inst_dumps(self, **serializer_kwargs):
-            return dumps(self, **serializer_kwargs)
+        def _inst_dumps(self, dict_factory=_default_dict_factory,
+                        serializer=None, **serializer_kwargs):
+            return dumps(
+                self, dict_factory=dict_factory, serializer=serializer,
+                **serializer_kwargs)
         _inst_dumps.__name__ = 'dumps'
         _inst_dumps.__doc__ = 'Serialize this instance with json or a custom serializer.'
         _set_new_attribute(
@@ -2670,6 +2673,8 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                                   unknown=RAISE, strict_types=False,
                                   type_vars=None, create_instance=True):
     """Validate value and collect every issue reachable from this value."""
+    # Keep this separate from _validate_and_convert: collect mode has different
+    # control flow for partial containers, Union trial errors, and nested objects.
     # No type annotation or MISSING -- skip validation
     if expected_type is None or expected_type is MISSING:
         return value
@@ -3069,6 +3074,8 @@ def _load_inner_collect(cls, data, path="", unknown=RAISE,
                         strict_types=False, type_vars=None, errors=None,
                         create_instance=True):
     """Recursively validate a dict while collecting validation issues."""
+    # Keep this separate from _load_inner: collect mode must keep walking after
+    # field errors, then avoid constructing partially invalid dataclass objects.
     if errors is None:
         errors = []
     start_errors = len(errors)

@@ -536,6 +536,9 @@ assert user.name == "Alice"
 
 ### `dump(instance)` — dataclass to dict
 
+`dump()` and `dumps()` serialize the current dataclass instance. They do not
+re-run load-time validation.
+
 ```python
 from dataclasses import dump
 

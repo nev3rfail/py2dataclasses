@@ -82,7 +82,8 @@ point = loads(Point, payload, serializer=msgpack, raw=False)
 `unknown=EXCLUDE` to ignore unknown, `ClassVar`, or `init=False` input keys.
 Scalar fields use marshmallow-style coercion by default; pass
 `strict_types=True` to require values to already match their annotated runtime
-types.
+types. `dump()` / `dumps()` serialize the current dataclass instance and do not
+run load-time validation.
 
 
 ## Development
