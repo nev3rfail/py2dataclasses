@@ -711,6 +711,7 @@ class _FuncBuilder(object):
             else:
                 class_qualname = cls.__qualname__
             fn.__qualname__ = '{0}.{1}'.format(class_qualname, fn.__name__)
+            fn.__dataclass_generated__ = True
 
             # Apply method annotations if they were stored
             if name in self.method_annotations:
@@ -1184,6 +1185,49 @@ def attach_debug_function(cls, fname, f):
     cls.fn_bodies[fname] = f
 
 
+def _py2_reflected_method(other, name):
+    for cls in getattr(other.__class__, '__mro__', (other.__class__,)):
+        namespace = getattr(cls, '__dict__', {})
+        if name in namespace:
+            method = namespace[name]
+            if cls is object or getattr(method, '__dataclass_generated__', False):
+                return None
+            return getattr(other, name, None)
+    return None
+
+
+def _py2_reflected_eq(self, other):
+    method = _py2_reflected_method(other, '__eq__')
+    if method is None:
+        return False
+    result = method(self)
+    return False if result is NotImplemented else result
+
+
+def _py2_reflected_ne(self, other):
+    method = _py2_reflected_method(other, '__ne__')
+    if method is not None:
+        result = method(self)
+        if result is not NotImplemented:
+            return result
+
+    method = _py2_reflected_method(other, '__eq__')
+    if method is None:
+        return True
+    result = method(self)
+    return True if result is NotImplemented else not result
+
+
+def _py2_reflected_order(self, other, reflected_name, error_msg):
+    method = _py2_reflected_method(other, reflected_name)
+    if method is not None:
+        result = method(self)
+        if result is not NotImplemented:
+            return result
+    raise TypeError(error_msg.format(self.__class__.__name__,
+                                     other.__class__.__name__))
+
+
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                    match_args, kw_only, slots, weakref_slot):
     fields = OrderedDict()
@@ -1433,13 +1477,37 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         cmp_fields = [field for field in field_list if field.compare]
         terms = ['self.{0}==other.{0}'.format(field.name) for field in cmp_fields]
         field_comparisons = ' and '.join(terms) or 'True'
+        if six.PY2 and not order:
+            not_equal_result = '__dataclass_py2_reflected_eq(self, other)'
+            eq_locals = {'__dataclass_py2_reflected_eq': _py2_reflected_eq}
+        else:
+            not_equal_result = 'NotImplemented'
+            eq_locals = None
         attach_debug_function(cls, *func_builder.add_fn('__eq__',
                                                         ('self', 'other'),
                                                         ['  if self is other:',
                                                          '   return True',
                                                          '  if other.__class__ is self.__class__:',
                                                          '   return {0}'.format(field_comparisons),
-                                                         '  return NotImplemented']))
+                                                         '  return {0}'.format(not_equal_result)],
+                                                        locals=eq_locals))
+        if six.PY2:
+            if not order:
+                ne_body = ['  if other.__class__ is not self.__class__:',
+                           '   return __dataclass_py2_reflected_ne(self, other)',
+                           '  result = self.__eq__(other)',
+                           '  return not result']
+                ne_locals = {'__dataclass_py2_reflected_ne': _py2_reflected_ne}
+            else:
+                ne_body = ['  result = self.__eq__(other)',
+                           '  if result is NotImplemented:',
+                           '   return __dataclass_py2_reflected_ne(self, other)',
+                           '  return not result']
+                ne_locals = {'__dataclass_py2_reflected_ne': _py2_reflected_ne}
+            attach_debug_function(cls, *func_builder.add_fn('__ne__',
+                                                            ('self', 'other'),
+                                                            ne_body,
+                                                            locals=ne_locals))
 
     if order:
         # Create and set the ordering methods.
@@ -1450,28 +1518,36 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
                          ('__le__', '<='),
                          ('__gt__', '>'),
                          ('__ge__', '>=')]:
-            attach_debug_function(cls, *func_builder.add_fn(name,
-                                                            ('self', 'other'),
-                                                            ['  if other.__class__ is self.__class__:',
-                                                             '   return {0}{1}{2}'.format(self_tuple, op, other_tuple),
-                                                             '  return NotImplemented'],
-                                                            overwrite_error='Consider using functools.total_ordering'))
-    elif six.PY2 and eq:
-        # In Python 2, we need to explicitly prevent comparisons when order=False but eq=True
-        # In Python 3, this is automatic, but in Py2 objects can be compared by default
-        for name, op in [('__lt__', '<'),
-                         ('__le__', '<='),
-                         ('__gt__', '>'),
-                         ('__ge__', '>=')]:
-            error_msg = "'{}' not supported between instances of '{{1}}' and '{{0}}'".format(op)
-
-            body = [
-                "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
-            ]
+            reflected_name = {'__lt__': '__gt__',
+                              '__le__': '__ge__',
+                              '__gt__': '__lt__',
+                              '__ge__': '__le__'}[name]
+            body = ['  if other.__class__ is self.__class__:',
+                    '   return {0}{1}{2}'.format(self_tuple, op, other_tuple)]
+            if six.PY2:
+                error_msg = "'{}' not supported between instances of '{{0}}' and '{{1}}'".format(op)
+                body.append("  return __dataclass_py2_reflected_order(self, other, {!r}, {!r})".format(
+                    reflected_name, error_msg))
+                order_locals = {'__dataclass_py2_reflected_order': _py2_reflected_order}
+            else:
+                body.append('  return NotImplemented')
+                order_locals = None
             attach_debug_function(cls, *func_builder.add_fn(name,
                                                             ('self', 'other'),
                                                             body,
-                                                            overwrite_error=None))
+                                                            locals=order_locals,
+                                                            overwrite_error='Consider using functools.total_ordering'))
+    elif six.PY2 and eq:
+        # Python 2 otherwise falls back to arbitrary object ordering. Use
+        # __cmp__ so rich order methods still stay absent when order=False.
+        error_msg = "not supported between instances of '{0}' and '{1}'"
+        body = [
+            "  raise TypeError({!r}.format(self.__class__.__name__, other.__class__.__name__))".format(error_msg)
+        ]
+        attach_debug_function(cls, *func_builder.add_fn('__cmp__',
+                                                        ('self', 'other'),
+                                                        body,
+                                                        overwrite_error=None))
 
     if frozen:
         _frozen_get_del_attr(cls, field_list, func_builder)

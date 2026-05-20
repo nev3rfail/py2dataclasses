@@ -21,7 +21,7 @@ import abc
 try:
     import funcsigs
 except ImportError:
-    pass
+    import inspect as funcsigs
 
 from collections import OrderedDict, deque
 
@@ -879,7 +879,8 @@ class TestCase(unittest.TestCase):
 
         @dataclass
         class D(object):
-            C = field(C)
+            C = field()
+            __annotations__ = OrderedDict([('C', C)])
 
         self.assertIn(",type=...,", repr(D.__dataclass_fields__["C"]))
 
@@ -1126,6 +1127,99 @@ class TestCase(unittest.TestCase):
         self.assertTrue(C(1) > C(0))
         self.assertTrue(C(1) >= C(0))
         self.assertTrue(C(1) >= C(1))
+
+    def test_ordered_compare_different_classes(self):
+        @dataclass(order=True)
+        class A(object):
+            x = field(int)
+
+        @dataclass(order=True)
+        class B(object):
+            x = field(int)
+
+        for idx, fn in enumerate([lambda a, b: a < b,
+                                  lambda a, b: a <= b,
+                                  lambda a, b: a > b,
+                                  lambda a, b: a >= b]):
+            with self.subTest(idx=idx):
+                with self.assertRaisesRegexp(TypeError,
+                                             "not supported between instances"):
+                    fn(A(1), B(1))
+
+    def test_ordered_eq_allows_reflected_comparison(self):
+        @dataclass(order=True)
+        class A(object):
+            x = field(int)
+
+        class B(object):
+            def __eq__(self, other):
+                return 'reflected eq'
+
+            def __ne__(self, other):
+                return 'reflected ne'
+
+        self.assertEqual(A(1) == B(), 'reflected eq')
+        self.assertEqual(A(1) != B(), 'reflected ne')
+
+    def test_ordered_reflected_ne_uses_reflected_eq(self):
+        @dataclass(order=True)
+        class A(object):
+            x = field(int)
+
+        class B(object):
+            def __eq__(self, other):
+                return True
+
+        self.assertFalse(A(1) != B())
+
+    def test_eq_only_allows_reflected_comparison(self):
+        @dataclass
+        class A(object):
+            x = field(int)
+
+        class B(object):
+            def __eq__(self, other):
+                return 'reflected eq'
+
+            def __ne__(self, other):
+                return 'reflected ne'
+
+        self.assertEqual(A(1) == B(), 'reflected eq')
+        self.assertEqual(A(1) != B(), 'reflected ne')
+
+    def test_eq_only_reflected_ne_uses_reflected_eq(self):
+        @dataclass
+        class A(object):
+            x = field(int)
+
+        class B(object):
+            def __eq__(self, other):
+                return True
+
+        self.assertFalse(A(1) != B())
+
+    def test_ordered_compare_allows_reflected_comparison(self):
+        @dataclass(order=True)
+        class A(object):
+            x = field(int)
+
+        class B(object):
+            def __lt__(self, other):
+                return 'reflected lt'
+
+            def __le__(self, other):
+                return 'reflected le'
+
+            def __gt__(self, other):
+                return 'reflected gt'
+
+            def __ge__(self, other):
+                return 'reflected ge'
+
+        self.assertEqual(A(1) < B(), 'reflected gt')
+        self.assertEqual(A(1) <= B(), 'reflected ge')
+        self.assertEqual(A(1) > B(), 'reflected lt')
+        self.assertEqual(A(1) >= B(), 'reflected le')
 
     #@unittest.skipIf(sys.version_info < (3,), "Python 3 cross-type comparison behavior")
     def test_compare_subclasses(self):
@@ -1809,13 +1903,15 @@ class TestCase(unittest.TestCase):
         c = C(10, 11, 50, 51)
         self.assertEqual(vars(c), {'x': 21, 'y': 101})
 
-    #@unittest.skip("property overwrites Field descriptor in py2dataclasses")
     def test_init_var_name_shadowing(self):
         # Shadowing an InitVar with a property
-        
+
         @dataclass
         class C(object):
-            shadowed = field(InitVar(int))
+            __annotations__ = OrderedDict([
+                ('shadowed', InitVar(int)),
+                ('_shadowed', int),
+            ])
             _shadowed = field(int, init=False)
 
             def __post_init__(self, shadowed):
@@ -2889,16 +2985,18 @@ class TestDocString(unittest.TestCase):
         self.assertDocStrEqual(C.__doc__, "C(x:undef)")
 
     def test_docstring_one_field_with_default_none(self):
+        from typing import Union
+
         @dataclass
         class C(object):
-            x = field('Union[int, type(None)]', default=None)
+            __annotations__ = OrderedDict([('x', Union[int, type(None)])])
+            x = None
 
         self.assertDocStrEqual(C.__doc__, "C(x:int|None=None)")
 
     def test_docstring_deque_field(self):
         @dataclass
         class C(object):
-            """a"""
             x = field(deque)
 
         self.assertDocStrEqual(C.__doc__, "C(x:collections.deque)")
@@ -2914,12 +3012,11 @@ class TestDocString(unittest.TestCase):
         # See: https://github.com/python/cpython/issues/128184
         ns = {}
         exec(textwrap.dedent("""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 @dataclass
 class C(object):
-    def __init__(self, x, num):
-        # type: (X, int) -> None
+    def __init__(self, x: X, num: int) -> None:
         pass
 """), ns)
 
@@ -4708,11 +4805,29 @@ class TestStringAnnotations(unittest.TestCase):
 
     @unittest.skipIf(six.PY2, "Python 2.7 don't have annotations.")
     def test_text_annotations(self):
-        from .dataclass_textanno import Bar, Foo
+        module_name = 'tests._fixtures_py27._dynamic_dataclass_textanno'
+        dataclass_textanno = types.ModuleType(module_name)
+        sys.modules[module_name] = dataclass_textanno
+        self.addCleanup(sys.modules.pop, module_name, None)
+        exec(textwrap.dedent("""
+from __future__ import annotations
+import dataclasses
 
-        # Skip this test as it requires get_type_hints functionality
-        # that may not be fully compatible in Python 2.7
-        raise Exception("Skip this test as it requires get_type_hints functionality")
+class Foo(object):
+    pass
+
+@dataclasses.dataclass
+class Bar(object):
+    foo: Foo
+"""), dataclass_textanno.__dict__)
+
+        self.assertEqual(
+            get_type_hints(dataclass_textanno.Bar),
+            {'foo': dataclass_textanno.Foo})
+        self.assertEqual(
+            get_type_hints(dataclass_textanno.Bar.__init__),
+            {'foo': dataclass_textanno.Foo,
+             'return': type(None)})
 
 class TestFrozen(unittest.TestCase):
     def test_inherit_frozen_mutliple_inheritance(self):
@@ -5060,4 +5175,3 @@ class TestZeroArgumentSuperWithSlots(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
