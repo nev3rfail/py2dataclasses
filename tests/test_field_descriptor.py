@@ -44,3 +44,24 @@ class TestFieldDescriptor(unittest.TestCase):
         value = C().value
 
         self.assertEqual(value, 7)
+
+    def test_uninitialized_inherited_field_descriptor_can_be_assigned(self):
+        @dataclass
+        class A(object):
+            x = field(int)
+
+        class B(A):
+            y = field(int)
+
+        self._bind_field_name(B, 'y')
+
+        @dataclass
+        class C(B):
+            z = field(int)
+
+        c = C(1, 3)
+
+        c.y = 5
+
+        self.assertEqual(c.y, 5)
+        self.assertEqual(c.__dict__['y'], 5)

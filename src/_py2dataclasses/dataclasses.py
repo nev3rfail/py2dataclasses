@@ -511,10 +511,13 @@ class Field(_Field):
         elif hasattr(type(self.default), "__set__"):
             # descriptor
             type(self.default).__set__(instance, value)
-        elif self.default is value:
-            pass
         else:
-            raise RuntimeError()
+            try:
+                instance_dict = object.__getattribute__(instance, '__dict__')
+            except AttributeError:
+                raise AttributeError(
+                    "object has no writable attribute {}".format(self.name))
+            instance_dict[self.name] = value
 
     def __set_name__(self, owner, name):
         _Field.__set_name__(self, owner, name)
