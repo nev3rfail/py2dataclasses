@@ -60,7 +60,6 @@ import keyword
 import itertools
 import weakref
 from collections import OrderedDict
-from types import NoneType
 
 import six
 
@@ -355,7 +354,7 @@ def _build_atomic_types():
     _types = set()
     # These are universally available via type():
     _types.add(type(None))  # NoneType
-    _types.add(type(types.EllipsisType))  # EllipsisType  (Ellipsis exists in Py2 too)
+    _types.add(type(Ellipsis))  # EllipsisType  (Ellipsis exists in Py2 too)
     _types.add(type(NotImplemented))  # NotImplementedType
     # Standard built-ins present on both Py2 and Py3:
     for _t in (bool, int, float, str, complex, bytes, type, property,
