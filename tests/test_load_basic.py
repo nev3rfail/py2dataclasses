@@ -106,6 +106,12 @@ class TestLoadBasic(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(Point, {'x': 1, 'y': 2, 'z': 3}, unknown=RAISE)
 
+    def test_load_non_string_extra_key_reports_unknown_field(self):
+        with self.assertRaises(TypeError) as cm:
+            load(Point, {'x': 1, 'y': 2, 1: 'extra'}, unknown=RAISE)
+
+        self.assertIn('Unknown fields for Point: 1', str(cm.exception))
+
     def test_load_nested_extra_keys_raise_by_default(self):
         with self.assertRaises(TypeError):
             load(UserWithAddress,

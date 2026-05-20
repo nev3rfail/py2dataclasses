@@ -2449,6 +2449,8 @@ def _coerce_plain_value(value, expected_type, strict_types):
 
 
 def _join_path(path, field_name):
+    if not isinstance(field_name, six.string_types):
+        field_name = repr(field_name)
     if path:
         return "{0}.{1}".format(path, field_name)
     return field_name
@@ -3142,11 +3144,12 @@ def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
     if unknown == RAISE:
         extra = set(data.keys()) - known_keys
         if extra:
-            prefix = path + "." if path else ""
             raise TypeError(
                 "Unknown fields for {0}: {1}".format(
                     cls.__name__,
-                    ', '.join(prefix + name for name in sorted(extra))))
+                    ', '.join(
+                        _join_path(path, name)
+                        for name in sorted(extra, key=repr))))
 
     if create_instance:
         return cls(**kwargs)
@@ -3225,7 +3228,7 @@ def _load_inner_collect(cls, data, path="", unknown=RAISE,
     # Check for unknown keys
     if unknown == RAISE:
         extra = set(data.keys()) - known_keys
-        for name in sorted(extra):
+        for name in sorted(extra, key=repr):
             _add_validation_issue(
                 errors, _join_path(path, name),
                 "unknown field for {0}".format(cls.__name__),

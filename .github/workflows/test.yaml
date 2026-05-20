@@ -75,7 +75,6 @@ jobs:
       - name: Run tox
         id: tox
         run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
-        continue-on-error: true
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && env.CODECOV_TOKEN != '' && hashFiles(format('{0}-coverage.xml', matrix.tox-env)) != '' }}
         uses: codecov/codecov-action@v5

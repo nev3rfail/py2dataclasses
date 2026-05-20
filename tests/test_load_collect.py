@@ -37,6 +37,14 @@ class TestCollectErrors(unittest.TestCase):
         self.assertIn('missing required field', messages['y'])
         self.assertIn('unknown field', messages['z'])
 
+    def test_collect_errors_handles_non_string_unknown_keys(self):
+        exc = self.assertValidationPaths(
+            lambda: validate(Point, {'x': 1, 'y': 2, 1: 'extra'},
+                             unknown=RAISE, collect_errors=True),
+            ['1'])
+
+        self.assertIn('unknown field', exc.errors[0].message)
+
     def test_collect_errors_nested_paths(self):
         data = {
             'name': 123,
