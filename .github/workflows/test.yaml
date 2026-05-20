@@ -1,6 +1,8 @@
 name: Test
 
-on: [push]
+on:
+  push:
+  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -8,6 +10,8 @@ concurrency:
 env:
   # Setting an environment variable with the value of a configuration variable
   GIST_STORAGE: ${{ vars.GIST_STORAGE }}
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  GIST_RW: ${{ secrets.GIST_RW }}
 jobs:
   build:
     strategy:
@@ -27,22 +31,27 @@ jobs:
             tox-env: "test_load_py27"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_native_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_load_py314"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_ported_on_portedlib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_ported_on_nativelib"
           - python-version: "3.14"
             os: ubuntu-latest
+            suffix: ""
             container: python:3.14
             tox-env: "test_native_on_nativelib"
     runs-on: ${{ matrix.os }}
@@ -68,10 +77,10 @@ jobs:
         run: python${{ matrix.suffix }} -m tox -e ${{ matrix.tox-env }}
         continue-on-error: true
       - name: Upload coverage to Codecov
-        if: ${{ !cancelled() && hashFiles(format('{0}-coverage.xml', matrix.tox-env)) != '' }}
+        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' && hashFiles(format('{0}-coverage.xml', matrix.tox-env)) != '' }}
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
           files: ${{ matrix.tox-env }}-coverage.xml
           name: ${{ matrix.tox-env }}
           flags: ${{ matrix.tox-env }}
@@ -127,8 +136,9 @@ jobs:
       - uses: Wandalen/wretry.action@master
         id: uploadit
         name: Upload badge
+        if: ${{ github.event_name == 'push' && env.GIST_RW != '' && env.GIST_STORAGE != '' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GIST_RW }}
+          GITHUB_TOKEN: ${{ env.GIST_RW }}
         with:
           action: gorgbus/gist-actions@main
           attempt_limit: 10

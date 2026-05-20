@@ -27,6 +27,7 @@ jobs:
               env:
                 UV_PYTHON: '3.14'
           - python-version: "3.14"
+            suffix: ""
             os: ubuntu-latest
             container: python:3.14
 #          - python-version: "3.x"
