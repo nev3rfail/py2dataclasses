@@ -129,6 +129,140 @@ class TestLoadBasic(unittest.TestCase):
         self.assertEqual(obj.address.city, 'NYC')
 
 
+class TestLoadPlanCache(unittest.TestCase):
+
+    def _clear_plan_cache(self, cls):
+        import _py2dataclasses.dataclasses as impl
+        try:
+            delattr(cls, impl._LOAD_FIELD_PLAN_CACHE)
+        except AttributeError:
+            pass
+        return impl
+
+    def test_load_plan_cache_covers_common_shapes(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass
+        class PlanInner(object):
+            value = field(int)
+
+        @dataclass
+        class PlanShape(object):
+            scalar = field(int)
+            optional = field(Optional[int])
+            any_value = field(Any)
+            nested = field(PlanInner)
+            values = field(List[int])
+            mapping = field(Dict[str, int])
+            pair = field(Tuple[int, str])
+            value_set = field(Set[int])
+
+        payload = {
+            'scalar': '1',
+            'optional': '2',
+            'any_value': object(),
+            'nested': {'value': '3'},
+            'values': ['4', 5],
+            'mapping': {'a': '6'},
+            'pair': ['7', 'seven'],
+            'value_set': ['8', 9],
+        }
+
+        obj = load(PlanShape, payload)
+        self.assertEqual(obj.scalar, 1)
+        self.assertEqual(obj.optional, 2)
+        self.assertIsInstance(obj.nested, PlanInner)
+        self.assertEqual(obj.values, [4, 5])
+        self.assertEqual(obj.mapping, {'a': 6})
+        self.assertEqual(obj.pair, (7, 'seven'))
+        self.assertEqual(obj.value_set, set([8, 9]))
+
+        cache = getattr(PlanShape, impl._LOAD_FIELD_PLAN_CACHE)
+        self.assertEqual(
+            sorted(cache.keys()),
+            ['any_value', 'mapping', 'nested', 'optional', 'pair',
+             'scalar', 'value_set', 'values'])
+        first_plans = dict(cache)
+
+        load(PlanShape, payload)
+        for name, plan in first_plans.items():
+            self.assertIs(cache[name], plan)
+
+    def test_load_plan_cache_is_per_class_for_same_field_name(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass
+        class IntValue(object):
+            value = field(int)
+
+        @dataclass
+        class StrValue(object):
+            value = field(str)
+
+        int_obj = load(IntValue, {'value': '10'})
+        str_obj = load(StrValue, {'value': '10'})
+
+        self.assertEqual(int_obj.value, 10)
+        self.assertEqual(str_obj.value, '10')
+        self.assertIsNot(
+            getattr(IntValue, impl._LOAD_FIELD_PLAN_CACHE),
+            getattr(StrValue, impl._LOAD_FIELD_PLAN_CACHE))
+
+    def test_explicit_type_vars_skip_load_plan_cache(self):
+        impl = self._clear_plan_cache(Box)
+
+        obj = load(Box, {'value': '10'}, type_vars={T: int})
+
+        self.assertEqual(obj.value, 10)
+        self.assertFalse(hasattr(Box, impl._LOAD_FIELD_PLAN_CACHE))
+
+    def test_collect_errors_does_not_use_load_plan_cache(self):
+        impl = self._clear_plan_cache(WithList)
+
+        obj = load(WithList, {'values': ['1', 2]}, collect_errors=True)
+
+        self.assertEqual(obj.values, [1, 2])
+        self.assertFalse(hasattr(WithList, impl._LOAD_FIELD_PLAN_CACHE))
+
+    def test_validate_and_load_share_class_plan_cache(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass
+        class ClassPlanShape(object):
+            values = field(List[int])
+
+        validate(ClassPlanShape, {'values': ['1', 2]})
+
+        class_plan = getattr(ClassPlanShape, impl._LOAD_CLASS_PLAN_CACHE)
+        known_names, loadable_fields, ordered_entries = class_plan
+        self.assertEqual(known_names, frozenset(['values']))
+        self.assertEqual([f.name for f in loadable_fields], ['values'])
+        self.assertIsNone(ordered_entries)
+
+        load(ClassPlanShape, {'values': ['3', 4]})
+        self.assertIs(
+            getattr(ClassPlanShape, impl._LOAD_CLASS_PLAN_CACHE),
+            class_plan)
+
+    def test_class_plan_preserves_classvar_error(self):
+        import _py2dataclasses.dataclasses as impl
+
+        try:
+            delattr(WithClassVar, impl._LOAD_CLASS_PLAN_CACHE)
+        except AttributeError:
+            pass
+
+        with self.assertRaises(TypeError) as cm:
+            load(WithClassVar, {'x': 1, 'class_val': 2, 'extra': 3})
+
+        self.assertIn('is ClassVar and cannot be loaded', str(cm.exception))
+        known_names, loadable_fields, ordered_entries = getattr(
+            WithClassVar, impl._LOAD_CLASS_PLAN_CACHE)
+        self.assertEqual(known_names, frozenset(['class_val', 'x']))
+        self.assertEqual([f.name for f in loadable_fields], ['x'])
+        self.assertIsNotNone(ordered_entries)
+
+
 # ---------------------------------------------------------------------------
 # Tests: type validation
 # ---------------------------------------------------------------------------

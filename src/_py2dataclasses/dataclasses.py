@@ -324,6 +324,14 @@ _FIELDS = '__dataclass_fields__'
 # field types for the common non-parameterized path.
 _LOAD_FIELD_TYPE_CACHE = '__dataclass_load_field_type_cache__'
 
+# The name of an attribute on the class where load()/validate() cache resolved
+# field validation plans for the common non-parameterized path.
+_LOAD_FIELD_PLAN_CACHE = '__dataclass_load_field_plan_cache__'
+
+# The name of an attribute on the class where load()/validate() cache field
+# iteration metadata for the common non-collecting path.
+_LOAD_CLASS_PLAN_CACHE = '__dataclass_load_class_plan_cache__'
+
 # The name of an attribute on the class that stores the parameters to
 # @dataclass.
 _PARAMS = '__dataclass_params__'
@@ -2496,6 +2504,302 @@ def _dataclass_type_and_type_vars(expected_type, type_vars=None):
     return None, type_vars
 
 
+_NO_LOAD_PLAN = object()
+_LOAD_PLAN_IDENTITY = object()
+_LOAD_PLAN_OPTIONAL = object()
+_LOAD_PLAN_PLAIN = object()
+_LOAD_PLAN_DATACLASS = object()
+_LOAD_PLAN_LIST = object()
+_LOAD_PLAN_DICT = object()
+_LOAD_PLAN_TUPLE = object()
+_LOAD_PLAN_VAR_TUPLE = object()
+_LOAD_PLAN_SET = object()
+_LOAD_FIELD_LOADABLE = object()
+_LOAD_FIELD_CLASSVAR = object()
+_LOAD_FIELD_INIT_FALSE = object()
+
+
+def _is_any_type(expected_type):
+    # In Python 2.7 typing backport, field() may store a different AnyMeta
+    # instance.
+    return expected_type is typing.Any or type(expected_type).__name__ == 'AnyMeta'
+
+
+def _contains_load_type_var(tp):
+    if isinstance(tp, typing.TypeVar):
+        return True
+    for arg in _get_type_args(tp):
+        if _contains_load_type_var(arg):
+            return True
+    return False
+
+
+def _type_vars_contain_load_type_var(type_vars):
+    if not type_vars:
+        return False
+    for tp in type_vars.values():
+        if _contains_load_type_var(tp):
+            return True
+    return False
+
+
+def _build_load_plan(expected_type):
+    if expected_type is None or expected_type is MISSING:
+        return (_LOAD_PLAN_IDENTITY, expected_type)
+
+    if isinstance(expected_type, typing.TypeVar):
+        return None
+
+    if _is_any_type(expected_type):
+        return (_LOAD_PLAN_IDENTITY, expected_type)
+
+    inner = _is_optional(expected_type)
+    if inner is not None:
+        inner_plan = _build_load_plan(inner)
+        if inner_plan is None:
+            return None
+        return (_LOAD_PLAN_OPTIONAL, expected_type, inner_plan)
+
+    dataclass_type, nested_type_vars = _dataclass_type_and_type_vars(
+        expected_type, None)
+    if dataclass_type is not None:
+        if _type_vars_contain_load_type_var(nested_type_vars):
+            return None
+        return (
+            _LOAD_PLAN_DATACLASS, expected_type,
+            dataclass_type, nested_type_vars)
+
+    origin = _get_type_origin(expected_type)
+    args = _get_type_args(expected_type)
+
+    if origin is not None:
+        if _origin_is(origin, list):
+            if args:
+                item_plan = _build_load_plan(args[0])
+                if item_plan is None:
+                    return None
+                return (_LOAD_PLAN_LIST, expected_type, item_plan)
+            return (_LOAD_PLAN_LIST, expected_type, None)
+
+        if _origin_is(origin, dict):
+            if args and len(args) == 2:
+                key_plan = _build_load_plan(args[0])
+                value_plan = _build_load_plan(args[1])
+                if key_plan is None or value_plan is None:
+                    return None
+                return (
+                    _LOAD_PLAN_DICT, expected_type, key_plan, value_plan)
+            return (_LOAD_PLAN_DICT, expected_type, None, None)
+
+        if _origin_is(origin, tuple):
+            if args:
+                if len(args) == 2 and args[1] is Ellipsis:
+                    item_plan = _build_load_plan(args[0])
+                    if item_plan is None:
+                        return None
+                    return (_LOAD_PLAN_VAR_TUPLE, expected_type, item_plan)
+                item_plans = tuple(_build_load_plan(arg) for arg in args)
+                if any(plan is None for plan in item_plans):
+                    return None
+                return (_LOAD_PLAN_TUPLE, expected_type, args, item_plans)
+            return (_LOAD_PLAN_TUPLE, expected_type, (), ())
+
+        if _origin_is(origin, set):
+            if args:
+                item_plan = _build_load_plan(args[0])
+                if item_plan is None:
+                    return None
+                return (_LOAD_PLAN_SET, expected_type, item_plan)
+            return (_LOAD_PLAN_SET, expected_type, None)
+
+        return None
+
+    if isinstance(expected_type, type):
+        return (_LOAD_PLAN_PLAIN, expected_type)
+
+    return None
+
+
+def _validate_and_convert_plan(value, plan, field_name, path,
+                               unknown=RAISE, strict_types=False,
+                               create_instance=True):
+    kind = plan[0]
+    expected_type = plan[1]
+    full_path = _join_path(path, field_name)
+
+    if kind is _LOAD_PLAN_IDENTITY:
+        return value
+
+    if kind is _LOAD_PLAN_OPTIONAL:
+        if value is None:
+            return None
+        return _validate_and_convert_plan(
+            value, plan[2], field_name, path, unknown=unknown,
+            strict_types=strict_types, create_instance=create_instance)
+
+    if value is None:
+        if expected_type is type(None):
+            return None
+        raise TypeError(
+            "Field '{0}' expected {1}, got None".format(
+                full_path, expected_type))
+
+    if kind is _LOAD_PLAN_DATACLASS:
+        dataclass_type = plan[2]
+        nested_type_vars = plan[3]
+        if isinstance(value, dict):
+            return _load_inner(
+                dataclass_type, value, full_path, unknown=unknown,
+                strict_types=strict_types, type_vars=nested_type_vars,
+                create_instance=create_instance)
+        elif isinstance(value, dataclass_type):
+            return value
+        else:
+            raise TypeError(
+                "Field '{0}' expected dict or {1}, got {2}".format(
+                    full_path, dataclass_type.__name__, type(value).__name__))
+
+    if kind is _LOAD_PLAN_LIST:
+        if not isinstance(value, list):
+            raise TypeError(
+                "Field '{0}' expected list, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        if item_plan is not None:
+            return [
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, v in enumerate(value)
+            ]
+        return list(value)
+
+    if kind is _LOAD_PLAN_DICT:
+        if not isinstance(value, dict):
+            raise TypeError(
+                "Field '{0}' expected dict, got {1}".format(
+                    full_path, type(value).__name__))
+        key_plan = plan[2]
+        value_plan = plan[3]
+        if key_plan is not None and value_plan is not None:
+            result = {}
+            for k, v in value.items():
+                converted_key = _validate_and_convert_plan(
+                    k, key_plan, "{0}{{key}}".format(field_name), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                converted_value = _validate_and_convert_plan(
+                    v, value_plan, "{0}[{1}]".format(field_name, k), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                result[converted_key] = converted_value
+            return result
+        return dict(value)
+
+    if kind is _LOAD_PLAN_TUPLE:
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(
+                "Field '{0}' expected list or tuple, got {1}".format(
+                    full_path, type(value).__name__))
+        args = plan[2]
+        item_plans = plan[3]
+        if item_plans:
+            if len(args) != len(value):
+                raise TypeError(
+                    "Field '{0}' expected tuple of length {1}, got {2}".format(
+                        full_path, len(args), len(value)))
+            return tuple(
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, (v, item_plan) in enumerate(zip(value, item_plans)))
+        return tuple(value)
+
+    if kind is _LOAD_PLAN_VAR_TUPLE:
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(
+                "Field '{0}' expected list or tuple, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        return tuple(
+            _validate_and_convert_plan(
+                v, item_plan, "{0}[{1}]".format(field_name, i), path,
+                unknown=unknown, strict_types=strict_types,
+                create_instance=create_instance)
+            for i, v in enumerate(value))
+
+    if kind is _LOAD_PLAN_SET:
+        if not isinstance(value, (list, set)):
+            raise TypeError(
+                "Field '{0}' expected list or set, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        if item_plan is not None:
+            return set(
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}{{{1}}}".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, v in enumerate(value))
+        return set(value)
+
+    if kind is _LOAD_PLAN_PLAIN:
+        try:
+            return _coerce_plain_value(value, expected_type, strict_types)
+        except TypeError as exc:
+            raise TypeError(
+                "Field '{0}' {1}".format(full_path, exc))
+
+    return _validate_and_convert(
+        value, expected_type, field_name, path, unknown=unknown,
+        strict_types=strict_types, type_vars=None,
+        create_instance=create_instance)
+
+
+def _build_load_class_plan(cls):
+    all_fields = getattr(cls, _FIELDS)
+    known_names = set()
+    loadable_fields = []
+    ordered_entries = []
+    has_non_loadable = False
+
+    for f in all_fields.values():
+        known_names.add(f.name)
+        if f._field_type is _FIELD_CLASSVAR:
+            ordered_entries.append((_LOAD_FIELD_CLASSVAR, f))
+            has_non_loadable = True
+        elif not f.init:
+            ordered_entries.append((_LOAD_FIELD_INIT_FALSE, f))
+            has_non_loadable = True
+        else:
+            ordered_entries.append((_LOAD_FIELD_LOADABLE, f))
+            loadable_fields.append(f)
+
+    if not has_non_loadable:
+        ordered_entries = None
+    else:
+        ordered_entries = tuple(ordered_entries)
+    return frozenset(known_names), tuple(loadable_fields), ordered_entries
+
+
+def _load_class_plan_cached(cls):
+    try:
+        plan = cls.__dict__.get(_LOAD_CLASS_PLAN_CACHE)
+    except (AttributeError, TypeError):
+        plan = None
+    if plan is not None:
+        return plan
+
+    plan = _build_load_class_plan(cls)
+    try:
+        setattr(cls, _LOAD_CLASS_PLAN_CACHE, plan)
+    except (AttributeError, TypeError):
+        pass
+    return plan
+
+
 def _class_eval_namespace(cls):
     module = sys.modules.get(getattr(cls, '__module__', None))
     if module is not None:
@@ -3113,6 +3417,33 @@ def _field_type_for_load_cached(cls, f, type_vars=None):
         return field_type
 
 
+def _field_load_plan_cached(cls, f, field_type, type_vars=None):
+    if type_vars is not None:
+        return None
+    if _has_unresolved_load_annotation(field_type):
+        return None
+
+    try:
+        cache = cls.__dict__.get(_LOAD_FIELD_PLAN_CACHE)
+    except (AttributeError, TypeError):
+        cache = None
+    if cache is None:
+        cache = {}
+        try:
+            setattr(cls, _LOAD_FIELD_PLAN_CACHE, cache)
+        except (AttributeError, TypeError):
+            return None
+
+    try:
+        plan = cache[f.name]
+    except KeyError:
+        plan = _build_load_plan(field_type)
+        cache[f.name] = plan if plan is not None else _NO_LOAD_PLAN
+    if plan is _NO_LOAD_PLAN:
+        return None
+    return plan
+
+
 def _has_unresolved_load_annotation(tp):
     if isinstance(tp, str):
         return True
@@ -3132,53 +3463,91 @@ def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
             "Expected dict for {0}, got {1}".format(
                 cls.__name__, type(data).__name__))
 
-    all_fields = getattr(cls, _FIELDS)
+    known_keys, loadable_fields, ordered_entries = _load_class_plan_cached(cls)
     kwargs = {}
-    known_keys = set()
 
-    for f in all_fields.values():
-        # Skip ClassVar fields; they are known but cannot be loaded.
-        if f._field_type is _FIELD_CLASSVAR:
-            if unknown == RAISE and f.name in data:
-                raise TypeError(
-                    "Field '{0}' is ClassVar and cannot be loaded".format(
-                        _join_path(path, f.name)))
-            known_keys.add(f.name)
-            continue
+    if ordered_entries is None:
+        for f in loadable_fields:
+            field_type = _field_type_for_load_cached(
+                cls, f, type_vars=type_vars)
 
-        # Skip init=False fields
-        if not f.init:
-            if unknown == RAISE and f.name in data:
-                raise TypeError(
-                    "Field '{0}' has init=False and cannot be loaded".format(
-                        _join_path(path, f.name)))
-            known_keys.add(f.name)
-            continue
-
-        known_keys.add(f.name)
-        field_type = _field_type_for_load_cached(
-            cls, f, type_vars=type_vars)
-
-        if f.name in data:
-            value = data[f.name]
-            converted = _validate_and_convert(
-                value, field_type, f.name, path, unknown=unknown,
-                strict_types=strict_types,
-                type_vars=type_vars, create_instance=create_instance)
-            if create_instance:
-                kwargs[f.name] = converted
-        else:
-            # Use default or raise
-            if f.default is not MISSING:
+            if f.name in data:
+                value = data[f.name]
+                field_plan = _field_load_plan_cached(
+                    cls, f, field_type, type_vars=type_vars)
+                if field_plan is not None:
+                    converted = _validate_and_convert_plan(
+                        value, field_plan, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        create_instance=create_instance)
+                else:
+                    converted = _validate_and_convert(
+                        value, field_type, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        type_vars=type_vars, create_instance=create_instance)
                 if create_instance:
-                    kwargs[f.name] = f.default
-            elif f.default_factory is not MISSING:
-                if create_instance:
-                    kwargs[f.name] = f.default_factory()
+                    kwargs[f.name] = converted
             else:
-                raise ValueError(
-                    "Missing required field '{0}' for {1}".format(
-                        _join_path(path, f.name), cls.__name__))
+                # Use default or raise
+                if f.default is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default
+                elif f.default_factory is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default_factory()
+                else:
+                    raise ValueError(
+                        "Missing required field '{0}' for {1}".format(
+                            _join_path(path, f.name), cls.__name__))
+    else:
+        for kind, f in ordered_entries:
+            # Skip ClassVar fields; they are known but cannot be loaded.
+            if kind is _LOAD_FIELD_CLASSVAR:
+                if unknown == RAISE and f.name in data:
+                    raise TypeError(
+                        "Field '{0}' is ClassVar and cannot be loaded".format(
+                            _join_path(path, f.name)))
+                continue
+
+            # Skip init=False fields
+            if kind is _LOAD_FIELD_INIT_FALSE:
+                if unknown == RAISE and f.name in data:
+                    raise TypeError(
+                        "Field '{0}' has init=False and cannot be loaded".format(
+                            _join_path(path, f.name)))
+                continue
+
+            field_type = _field_type_for_load_cached(
+                cls, f, type_vars=type_vars)
+
+            if f.name in data:
+                value = data[f.name]
+                field_plan = _field_load_plan_cached(
+                    cls, f, field_type, type_vars=type_vars)
+                if field_plan is not None:
+                    converted = _validate_and_convert_plan(
+                        value, field_plan, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        create_instance=create_instance)
+                else:
+                    converted = _validate_and_convert(
+                        value, field_type, f.name, path, unknown=unknown,
+                        strict_types=strict_types,
+                        type_vars=type_vars, create_instance=create_instance)
+                if create_instance:
+                    kwargs[f.name] = converted
+            else:
+                # Use default or raise
+                if f.default is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default
+                elif f.default_factory is not MISSING:
+                    if create_instance:
+                        kwargs[f.name] = f.default_factory()
+                else:
+                    raise ValueError(
+                        "Missing required field '{0}' for {1}".format(
+                            _join_path(path, f.name), cls.__name__))
 
     # Check for unknown keys
     if unknown == RAISE:

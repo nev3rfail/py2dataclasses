@@ -85,6 +85,16 @@ Scalar fields use marshmallow-style coercion by default; pass
 types. `dump()` / `dumps()` serialize the current dataclass instance and do not
 run load-time validation.
 
+The `load()` / `loads()` / `validate()` / `validates()` schema is expected to
+stay static after the class is created. Avoid mutating field definitions, field
+types, `__annotations__`, `__dataclass_fields__`, or `ClassVar` / `init=False`
+metadata for classes that use these APIs, especially after the first
+load/validation call. The load/validation path may cache resolved field metadata
+for performance, so runtime schema mutation is not a supported load/validation
+workflow. If you only use regular dataclass behavior and never call these APIs,
+this cache does not apply. For dynamic load/validation schemas, create a new
+dataclass type instead.
+
 
 ## Development
 
