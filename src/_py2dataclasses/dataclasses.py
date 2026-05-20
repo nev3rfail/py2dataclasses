@@ -1583,7 +1583,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     # Add __annotate__ method for PEP 649 compatibility (Python 3.14+)
     if _annotationlib is not None:
         # Only add if not already present (allow custom implementations)
-        if not hasattr(cls, '__annotate__') or getattr(cls, '__annotate__', None) is None:
+        if getattr(cls, '__annotate__', None) is None:
             # Build list of field names for annotation
             annotation_field_names = [f.name for f in fields.values()]
             cls.__annotate__ = _make_annotate_function(

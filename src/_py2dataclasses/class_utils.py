@@ -28,8 +28,9 @@ def _qualname(o):
 import inspect
 
 def compute_qualname(cls):
-    if hasattr(cls, "__qualname__"):
-        return cls.__qualname__
+    existing = getattr(cls, "__qualname__", None)
+    if existing is not None:
+        return existing
 
     name = cls.__name__
 

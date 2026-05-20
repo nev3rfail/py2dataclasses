@@ -173,72 +173,77 @@ def _get_type_str(f_type):
         type_str = None
 
         # Handle typing generics with subscripts
-        if hasattr(f_type, '__origin__'):
-            origin = f_type.__origin__
-            if hasattr(f_type, '__args__'):
-                args = f_type.__args__
+        origin = _get_type_origin(f_type)
+        args = _get_type_args(f_type)
+        if origin is not None and args:
 
-                # Check if this is a Union type
-                if origin is typing.Union:
-                    # Handle Union[X, NoneType] -> X|None conversion
-                    non_none_args = [arg for arg in args if arg is not type(None)]
-                    if type(None) in args and len(non_none_args) == 1:
-                        # This is Optional[X] - convert to X|None
-                        inner_type = non_none_args[0]
-                        if hasattr(inner_type, '__name__'):
-                            inner_str = inner_type.__name__
-                        else:
-                            inner_str = str(inner_type).replace('typing.', '')
-                        return inner_str + '|None'
+            # Check if this is a Union type
+            if origin is typing.Union:
+                # Handle Union[X, NoneType] -> X|None conversion
+                non_none_args = [arg for arg in args if arg is not type(None)]
+                if type(None) in args and len(non_none_args) == 1:
+                    # This is Optional[X] - convert to X|None
+                    inner_type = non_none_args[0]
+                    inner_name = getattr(inner_type, '__name__', None)
+                    if inner_name is not None:
+                        inner_str = inner_name
                     else:
-                        # Multiple types in union
-                        arg_strs = []
-                        for arg in args:
-                            if arg is type(None):
-                                arg_strs.append('None')
-                            elif hasattr(arg, '__name__'):
-                                arg_strs.append(arg.__name__)
-                            else:
-                                arg_strs.append(str(arg).replace('typing.', ''))
-                        return 'Union[' + ','.join(arg_strs) + ']'
-
-                # Try to get the typing name from the type's representation
-                type_repr = repr(f_type)
-                # Check if it's from typing module - e.g. "typing.List[int]"
-                if 'typing.' in type_repr and '[' in type_repr:
-                    # Extract the typing name
-                    parts = type_repr.split('[')
-                    origin_name = parts[0].replace('typing.', '')
+                        inner_str = str(inner_type).replace('typing.', '')
+                    return inner_str + '|None'
                 else:
-                    # Get origin name
-                    if hasattr(origin, '__name__'):
-                        origin_name = origin.__name__
-                    elif hasattr(origin, '_name'):
-                        origin_name = origin._name
-                    else:
-                        origin_name = str(origin)
+                    # Multiple types in union
+                    arg_strs = []
+                    for arg in args:
+                        arg_name = getattr(arg, '__name__', None)
+                        if arg is type(None):
+                            arg_strs.append('None')
+                        elif arg_name is not None:
+                            arg_strs.append(arg_name)
+                        else:
+                            arg_strs.append(str(arg).replace('typing.', ''))
+                    return 'Union[' + ','.join(arg_strs) + ']'
 
-                # Format args
-                arg_strs = []
-                for arg in args:
-                    if hasattr(arg, '__name__'):
-                        arg_strs.append(arg.__name__)
-                    else:
-                        arg_strs.append(str(arg).replace('typing.', ''))
+            # Try to get the typing name from the type's representation
+            type_repr = repr(f_type)
+            # Check if it's from typing module - e.g. "typing.List[int]"
+            if 'typing.' in type_repr and '[' in type_repr:
+                # Extract the typing name
+                parts = type_repr.split('[')
+                origin_name = parts[0].replace('typing.', '')
+            else:
+                # Get origin name
+                origin_name = getattr(origin, '__name__', None)
+                if origin_name is None:
+                    origin_name = getattr(origin, '_name', None)
+                if origin_name is None:
+                    origin_name = str(origin)
 
-                type_str = '{0}[{1}]'.format(origin_name, ','.join(arg_strs))
+            # Format args
+            arg_strs = []
+            for arg in args:
+                arg_name = getattr(arg, '__name__', None)
+                if arg_name is not None:
+                    arg_strs.append(arg_name)
+                else:
+                    arg_strs.append(str(arg).replace('typing.', ''))
+
+            type_str = '{0}[{1}]'.format(origin_name, ','.join(arg_strs))
 
         # Handle simple types
         if type_str is None:
-            if hasattr(f_type, '__module__') and hasattr(f_type, '__qualname__'):
-                if f_type.__module__ in ('builtins', '__builtin__'):
-                    type_str = f_type.__qualname__
+            module = getattr(f_type, '__module__', None)
+            qualname = getattr(f_type, '__qualname__', None)
+            if module is not None and qualname is not None:
+                if module in ('builtins', '__builtin__'):
+                    type_str = qualname
                 else:
-                    type_str = f_type.__module__ + '.' + f_type.__qualname__
-            elif hasattr(f_type, '__name__'):
-                type_str = f_type.__name__
+                    type_str = module + '.' + qualname
             else:
-                type_str = str(f_type)
+                name = getattr(f_type, '__name__', None)
+                if name is not None:
+                    type_str = name
+                else:
+                    type_str = str(f_type)
 
         # Clean up typing annotations
         if type_str:
@@ -256,4 +261,3 @@ def _get_type_str(f_type):
         pass
 
     return 'typing.Any'
-
