@@ -320,6 +320,10 @@ _FIELD_INITVAR = _FIELD_BASE('_FIELD_INITVAR')
 # objects.  Also used to check if a class is a Data Class.
 _FIELDS = '__dataclass_fields__'
 
+# The name of an attribute on the class where load()/validate() cache resolved
+# field types for the common non-parameterized path.
+_LOAD_FIELD_TYPE_CACHE = '__dataclass_load_field_type_cache__'
+
 # The name of an attribute on the class that stores the parameters to
 # @dataclass.
 _PARAMS = '__dataclass_params__'
@@ -3085,6 +3089,41 @@ def _field_type_for_load(cls, f, type_vars=None):
     return _resolve_load_type(owner, field_type, type_vars=field_type_vars)
 
 
+def _field_type_for_load_cached(cls, f, type_vars=None):
+    if type_vars is not None:
+        return _field_type_for_load(cls, f, type_vars=type_vars)
+
+    try:
+        cache = cls.__dict__.get(_LOAD_FIELD_TYPE_CACHE)
+    except (AttributeError, TypeError):
+        cache = None
+    if cache is None:
+        cache = {}
+        try:
+            setattr(cls, _LOAD_FIELD_TYPE_CACHE, cache)
+        except (AttributeError, TypeError):
+            return _field_type_for_load(cls, f, type_vars=None)
+
+    try:
+        return cache[f.name]
+    except KeyError:
+        field_type = _field_type_for_load(cls, f, type_vars=None)
+        if not _has_unresolved_load_annotation(field_type):
+            cache[f.name] = field_type
+        return field_type
+
+
+def _has_unresolved_load_annotation(tp):
+    if isinstance(tp, str):
+        return True
+    if hasattr(tp, '__forward_arg__'):
+        return True
+    for arg in _get_type_args(tp):
+        if _has_unresolved_load_annotation(arg):
+            return True
+    return False
+
+
 def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
                 type_vars=None, create_instance=True):
     """Recursively validate a dict and optionally construct a dataclass instance."""
@@ -3117,7 +3156,8 @@ def _load_inner(cls, data, path="", unknown=RAISE, strict_types=False,
             continue
 
         known_keys.add(f.name)
-        field_type = _field_type_for_load(cls, f, type_vars=type_vars)
+        field_type = _field_type_for_load_cached(
+            cls, f, type_vars=type_vars)
 
         if f.name in data:
             value = data[f.name]
@@ -3202,7 +3242,8 @@ def _load_inner_collect(cls, data, path="", unknown=RAISE,
             continue
 
         known_keys.add(f.name)
-        field_type = _field_type_for_load(cls, f, type_vars=type_vars)
+        field_type = _field_type_for_load_cached(
+            cls, f, type_vars=type_vars)
 
         if f.name in data:
             converted = _validate_and_convert_collect(
