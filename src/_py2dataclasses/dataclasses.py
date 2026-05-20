@@ -487,11 +487,16 @@ class Field(_Field):
         if hasattr(self.default, "__get__"):
             v = self.default.__get__(instance, owner)
         else:
-            if not instance:
+            if instance is None:
                 v = self
-            elif self.name and hasattr(instance, self.name):
-                v = object.__getattribute__(self, self.name)
             else:
+                if self.name:
+                    try:
+                        instance_dict = object.__getattribute__(instance, '__dict__')
+                    except AttributeError:
+                        instance_dict = None
+                    if instance_dict is not None and self.name in instance_dict:
+                        return instance_dict[self.name]
                 v = self.default if self.default is not MISSING else self.default_factory() if self.default_factory is not MISSING else throw(
                     AttributeError, "object has no attribute {}".format(self.name))
                 # v = (self.default if self.default is not MISSING
