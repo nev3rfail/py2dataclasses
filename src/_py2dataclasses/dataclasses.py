@@ -332,6 +332,10 @@ _LOAD_FIELD_PLAN_CACHE = '__dataclass_load_field_plan_cache__'
 # iteration metadata for the common non-collecting path.
 _LOAD_CLASS_PLAN_CACHE = '__dataclass_load_class_plan_cache__'
 
+# The name of an attribute on the class where fields() caches real dataclass
+# fields, excluding ClassVar and InitVar pseudo-fields.
+_FIELDS_CACHE = '__dataclass_real_fields_cache__'
+
 # The name of an attribute on the class that stores the parameters to
 # @dataclass.
 _PARAMS = '__dataclass_params__'
@@ -2003,9 +2007,9 @@ def fields(class_or_instance):
     type Field.
     """
 
-    # Might it be worth caching this, per class?
+    cls = class_or_instance if isinstance(class_or_instance, type) else type(class_or_instance)
     try:
-        flds = getattr(class_or_instance, _FIELDS)
+        flds = getattr(cls, _FIELDS)
     except AttributeError:
         exc = TypeError('must be called with a dataclass type or instance')
         exc.__cause__ = None
@@ -2013,8 +2017,22 @@ def fields(class_or_instance):
             exc.__suppress_context__ = True
         raise exc
 
-    # Exclude pseudo-fields.
-    return tuple(f for f in flds.values() if f._field_type is _FIELD)
+    try:
+        cached = cls.__dict__.get(_FIELDS_CACHE)
+    except (AttributeError, TypeError):
+        cached = None
+    if cached is not None:
+        return cached
+
+    # fields() is called for every nested dataclass during dump/asdict. Keep the
+    # filtered tuple per class, but read cls.__dict__ directly so subclasses do
+    # not inherit a parent's field list.
+    real_fields = tuple(f for f in flds.values() if f._field_type is _FIELD)
+    try:
+        setattr(cls, _FIELDS_CACHE, real_fields)
+    except (AttributeError, TypeError):
+        pass
+    return real_fields
 
 
 def _is_dataclass_instance(obj):
@@ -2065,12 +2083,21 @@ def _asdict_inner(obj, dict_factory):
         if dict_factory is dict:
             return {
                 f.name: _asdict_inner(getattr(obj, f.name), dict)
-                for f in fields(obj)
+                for f in fields(obj_type)
             }
+        elif dict_factory is OrderedDict:
+            # Python 2 uses OrderedDict by default to keep dataclass field order.
+            # Filling it directly avoids allocating a temporary list of pairs and
+            # running OrderedDict.update() for every nested dataclass object.
+            result = OrderedDict()
+            for f in fields(obj_type):
+                result[f.name] = _asdict_inner(
+                    getattr(obj, f.name), OrderedDict)
+            return result
         else:
             return dict_factory([
                 (f.name, _asdict_inner(getattr(obj, f.name), dict_factory))
-                for f in fields(obj)
+                for f in fields(obj_type)
             ])
     # handle the builtin types first for speed
     elif obj_type is list:

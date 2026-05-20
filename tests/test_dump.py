@@ -83,6 +83,62 @@ class TestDump(unittest.TestCase):
         d = dump(obj)
         self.assertEqual(d['address']['city'], 'NYC')
 
+    def test_dump_ordered_dict_factory_preserves_order(self):
+        from collections import OrderedDict
+
+        @dataclass
+        class OrderedDumpInner(object):
+            left = field(int)
+            right = field(int)
+
+        @dataclass
+        class OrderedDumpOuter(object):
+            name = field(str)
+            count = field(int)
+            inner = field(OrderedDumpInner)
+
+        d = dump(OrderedDumpOuter('outer', 2, OrderedDumpInner(3, 4)),
+                 dict_factory=OrderedDict)
+
+        self.assertIs(type(d), OrderedDict)
+        self.assertIs(type(d['inner']), OrderedDict)
+        self.assertEqual(list(d.keys()), ['name', 'count', 'inner'])
+        self.assertEqual(list(d['inner'].keys()), ['left', 'right'])
+
+    def test_dump_custom_dict_factory_still_receives_pairs(self):
+        calls = []
+
+        def recording_factory(pairs):
+            calls.append(pairs)
+            return dict(pairs)
+
+        d = dump(Point(1, 2), dict_factory=recording_factory)
+
+        self.assertEqual(d, {'x': 1, 'y': 2})
+        self.assertEqual(calls, [[('x', 1), ('y', 2)]])
+
+    def test_fields_cache_is_per_class(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass
+        class DumpFieldsBase(object):
+            x = field(int)
+
+        @dataclass
+        class DumpFieldsChild(DumpFieldsBase):
+            y = field(int)
+
+        base_fields = impl.fields(DumpFieldsBase)
+        child_fields = impl.fields(DumpFieldsChild)
+
+        self.assertIs(impl.fields(DumpFieldsBase), base_fields)
+        self.assertIs(impl.fields(DumpFieldsChild(1, 2)), child_fields)
+        self.assertEqual([f.name for f in base_fields], ['x'])
+        self.assertEqual([f.name for f in child_fields], ['x', 'y'])
+        self.assertIsNot(
+            getattr(DumpFieldsBase, impl._FIELDS_CACHE),
+            getattr(DumpFieldsChild, impl._FIELDS_CACHE))
+
     def test_generated_method_names_do_not_override_fields(self):
         @dataclass
         class WithGeneratedMethodNameFields(object):
