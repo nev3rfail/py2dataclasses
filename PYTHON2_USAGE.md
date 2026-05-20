@@ -187,6 +187,23 @@ class Manual(object):
         self.x = 42
 ```
 
+### `cache=True` (default) — helper metadata cache
+
+`load()`, `validate()`, `dump()`, `asdict()`, and `fields()` cache resolved
+dataclass metadata by default for faster repeated calls. This assumes the
+dataclass schema stays static after class creation.
+
+If a class intentionally mutates `__annotations__`, `__dataclass_fields__`, or
+field metadata at runtime, disable these helper caches for that class:
+
+```python
+@dataclass(cache=False)
+class DynamicSchema(object):
+    value = field(int)
+```
+
+The same option is available on `make_dataclass(..., cache=False)`.
+
 ## ClassVar — Class Variables
 
 `ClassVar` fields are shared across all instances and are not included in `__init__`, `__repr__`, or comparisons:
@@ -537,7 +554,9 @@ assert user.name == "Alice"
 ### `dump(instance)` — dataclass to dict
 
 `dump()` and `dumps()` serialize the current dataclass instance. They do not
-re-run load-time validation.
+re-run load-time validation. By default they reuse cached field metadata from
+`@dataclass(cache=True)`; use `cache=False` on the dataclass only for dynamic
+runtime schemas.
 
 ```python
 from dataclasses import dump

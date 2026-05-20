@@ -139,6 +139,33 @@ class TestDump(unittest.TestCase):
             getattr(DumpFieldsBase, impl._FIELDS_CACHE),
             getattr(DumpFieldsChild, impl._FIELDS_CACHE))
 
+    def test_cache_false_disables_fields_cache(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass(cache=False)
+        class DumpNoCache(object):
+            x = field(int)
+
+        first_fields = impl.fields(DumpNoCache)
+        second_fields = impl.fields(DumpNoCache)
+        dumped = dump(DumpNoCache(1))
+
+        self.assertFalse(DumpNoCache.__dataclass_params__.cache)
+        self.assertIsNot(first_fields, second_fields)
+        self.assertEqual([f.name for f in first_fields], ['x'])
+        self.assertEqual(dumped, {'x': 1})
+        self.assertFalse(hasattr(DumpNoCache, impl._FIELDS_CACHE))
+
+    def test_make_dataclass_accepts_cache_false(self):
+        import _py2dataclasses.dataclasses as impl
+
+        MadeNoCache = impl.make_dataclass(
+            'MadeNoCache', [('x', int)], cache=False)
+
+        self.assertFalse(MadeNoCache.__dataclass_params__.cache)
+        self.assertEqual(impl.fields(MadeNoCache)[0].name, 'x')
+        self.assertFalse(hasattr(MadeNoCache, impl._FIELDS_CACHE))
+
     def test_generated_method_names_do_not_override_fields(self):
         @dataclass
         class WithGeneratedMethodNameFields(object):

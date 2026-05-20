@@ -262,6 +262,23 @@ class TestLoadPlanCache(unittest.TestCase):
         self.assertEqual([f.name for f in loadable_fields], ['x'])
         self.assertIsNotNone(ordered_entries)
 
+    def test_cache_false_disables_load_and_validate_caches(self):
+        import _py2dataclasses.dataclasses as impl
+
+        @dataclass(cache=False)
+        class LoadNoCache(object):
+            values = field(List[int])
+
+        loaded = LoadNoCache.load({'values': ['1', 2]})
+        validated = validate(LoadNoCache, {'values': ['3', 4]})
+
+        self.assertFalse(LoadNoCache.__dataclass_params__.cache)
+        self.assertEqual(loaded.values, [1, 2])
+        self.assertTrue(validated)
+        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_CLASS_PLAN_CACHE))
+        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_FIELD_TYPE_CACHE))
+        self.assertFalse(hasattr(LoadNoCache, impl._LOAD_FIELD_PLAN_CACHE))
+
 
 # ---------------------------------------------------------------------------
 # Tests: type validation

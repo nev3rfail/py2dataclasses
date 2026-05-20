@@ -340,6 +340,12 @@ _FIELDS_CACHE = '__dataclass_real_fields_cache__'
 # @dataclass.
 _PARAMS = '__dataclass_params__'
 
+
+def _dataclass_cache_enabled(cls):
+    params = getattr(cls, _PARAMS, None)
+    return getattr(params, 'cache', True)
+
+
 # The name of the function, that if it exists, is called at the end of
 # __init__.
 _POST_INIT_NAME = '__post_init__'
@@ -550,10 +556,11 @@ class _DataclassParams(object):
                  'kw_only',
                  'slots',
                  'weakref_slot',
+                 'cache',
                  )
 
     def __init__(self, init, repr, eq, order, unsafe_hash, frozen,
-                 match_args, kw_only, slots, weakref_slot):
+                 match_args, kw_only, slots, weakref_slot, cache):
         self.init = init
         self.repr = repr
         self.eq = eq
@@ -564,6 +571,7 @@ class _DataclassParams(object):
         self.kw_only = kw_only
         self.slots = slots
         self.weakref_slot = weakref_slot
+        self.cache = cache
 
     def __repr__(self):
         return ('_DataclassParams('
@@ -576,11 +584,12 @@ class _DataclassParams(object):
                 'match_args={6!r},'
                 'kw_only={7!r},'
                 'slots={8!r},'
-                'weakref_slot={9!r}'
+                'weakref_slot={9!r},'
+                'cache={10!r}'
                 ')').format(
             self.init, self.repr, self.eq, self.order,
             self.unsafe_hash, self.frozen, self.match_args,
-            self.kw_only, self.slots, self.weakref_slot)
+            self.kw_only, self.slots, self.weakref_slot, self.cache)
 
 
 def _field(default=MISSING, default_factory=MISSING, init=True, repr=True,
@@ -1244,7 +1253,7 @@ def _py2_reflected_order(self, other, reflected_name, error_msg):
 
 
 def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
-                   match_args, kw_only, slots, weakref_slot):
+                   match_args, kw_only, slots, weakref_slot, cache):
     fields = OrderedDict()
 
     # Save reference to the built-in repr before it's shadowed by the parameter
@@ -1258,7 +1267,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     setattr(cls, _PARAMS, _DataclassParams(init, repr, eq, order,
                                            unsafe_hash, frozen,
                                            match_args, kw_only,
-                                           slots, weakref_slot))
+                                           slots, weakref_slot, cache))
 
     any_frozen_base = False
     all_frozen_bases = None
@@ -1406,6 +1415,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if _can_add_generated_method(cls, 'load', field_names):
         def _cls_load(klass, data, unknown=RAISE, strict_types=False,
                       type_vars=None, collect_errors=False):
+            # type: (typing.Type[typing.Any], dict, str, bool, typing.Optional[dict], bool) -> typing.Any
             _check_generated_load_type_vars(klass, type_vars)
             return load(klass, data, unknown=unknown, strict_types=strict_types,
                         type_vars=type_vars,
@@ -1420,6 +1430,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         def _cls_loads(klass, payload, unknown=RAISE, strict_types=False,
                        type_vars=None, collect_errors=False, serializer=None,
                        **serializer_kwargs):
+            # type: (typing.Type[typing.Any], typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> typing.Any
             _check_generated_load_type_vars(klass, type_vars)
             return loads(klass, payload, unknown=unknown,
                          strict_types=strict_types, type_vars=type_vars,
@@ -1433,6 +1444,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
 
     if _can_add_generated_method(cls, 'dump', field_names):
         def _inst_dump(self, dict_factory=_default_dict_factory):
+            # type: (typing.Any, typing.Any) -> dict
             return dump(self, dict_factory=dict_factory)
         _inst_dump.__name__ = 'dump'
         _inst_dump.__doc__ = 'Serialize this instance to a dictionary.'
@@ -1443,6 +1455,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
     if _can_add_generated_method(cls, 'dumps', field_names):
         def _inst_dumps(self, dict_factory=_default_dict_factory,
                         serializer=None, **serializer_kwargs):
+            # type: (typing.Any, typing.Any, typing.Any, **typing.Any) -> typing.Any
             return dumps(
                 self, dict_factory=dict_factory, serializer=serializer,
                 **serializer_kwargs)
@@ -1960,7 +1973,7 @@ def annotate(__annotations__, **kwargs):
 
 def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
               unsafe_hash=False, frozen=False, match_args=True,
-              kw_only=False, slots=False, weakref_slot=False):
+              kw_only=False, slots=False, weakref_slot=False, cache=True):
     """Add dunder methods based on the fields defined in the class.
 
     Examines __annotations__ to determine fields.
@@ -1972,7 +1985,8 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
     assigned to after instance creation. If match_args is true, the
     __match_args__ tuple is added. If kw_only is true, then by default
     all fields are keyword-only. If slots is true, a new class with a
-    __slots__ attribute is returned.
+    __slots__ attribute is returned. If cache is true, load/dump helper
+    metadata may be cached on the class for faster repeated operations.
     """
 
     # class F(object):
@@ -1989,7 +2003,7 @@ def dataclass(cls=None, init=True, repr=True, eq=True, order=False,
             annotate(__annotations__={})(cls)
         return _process_class(cls, init, repr, eq, order, unsafe_hash,
                               frozen, match_args, kw_only, slots,
-                              weakref_slot)
+                              weakref_slot, cache)
 
     # See if we're being called as @dataclass or @dataclass().
     if cls is None:
@@ -2017,21 +2031,24 @@ def fields(class_or_instance):
             exc.__suppress_context__ = True
         raise exc
 
-    try:
-        cached = cls.__dict__.get(_FIELDS_CACHE)
-    except (AttributeError, TypeError):
-        cached = None
-    if cached is not None:
-        return cached
+    cache_enabled = _dataclass_cache_enabled(cls)
+    if cache_enabled:
+        try:
+            cached = cls.__dict__.get(_FIELDS_CACHE)
+        except (AttributeError, TypeError):
+            cached = None
+        if cached is not None:
+            return cached
 
-    # fields() is called for every nested dataclass during dump/asdict. Keep the
-    # filtered tuple per class, but read cls.__dict__ directly so subclasses do
-    # not inherit a parent's field list.
+    # fields() is called for every nested dataclass during dump/asdict. When
+    # caching is enabled, keep the filtered tuple per class, but read
+    # cls.__dict__ directly so subclasses do not inherit a parent's field list.
     real_fields = tuple(f for f in flds.values() if f._field_type is _FIELD)
-    try:
-        setattr(cls, _FIELDS_CACHE, real_fields)
-    except (AttributeError, TypeError):
-        pass
+    if cache_enabled:
+        try:
+            setattr(cls, _FIELDS_CACHE, real_fields)
+        except (AttributeError, TypeError):
+            pass
     return real_fields
 
 
@@ -2212,6 +2229,7 @@ def make_dataclass(
         kw_only=False,  # type: bool
         slots=False,  # type: bool
         weakref_slot=False,  # type: bool
+        cache=True,  # type: bool
         module=None,  # type: typing.Optional[str],
         decorator=dataclass  # type: typing.Callable[[typing.Type[T], ...], typing.Type[T]]
 ):
@@ -2223,6 +2241,8 @@ def make_dataclass(
     of either (name), (name, type) or (name, type, Field) objects. If type is
     omitted, use the string 'typing.Any'.  Field objects are created by
     the equivalent of calling 'field(name, type [, Field-info])'.
+    Pass cache=False to disable class-level helper caches on the created
+    dataclass.
 
       C = make_dataclass('C', ['x', ('y', int), ('z', int, field(init=False))], bases=(Base,))
 
@@ -2333,10 +2353,13 @@ def make_dataclass(
         cls.__module__ = module
 
     # Apply the decorator
-    cls = decorator(cls, init=init, repr=repr, eq=eq, order=order,
-                    unsafe_hash=unsafe_hash, frozen=frozen,
-                    match_args=match_args, kw_only=kw_only, slots=slots,
-                    weakref_slot=weakref_slot)
+    decorator_kwargs = dict(
+        init=init, repr=repr, eq=eq, order=order,
+        unsafe_hash=unsafe_hash, frozen=frozen, match_args=match_args,
+        kw_only=kw_only, slots=slots, weakref_slot=weakref_slot)
+    if cache is not True:
+        decorator_kwargs['cache'] = cache
+    cls = decorator(cls, **decorator_kwargs)
 
     # Unblock VALUE format AFTER decorator processing
     # (decorator's _process_class calls get_annotations which tries VALUE first)
@@ -2812,6 +2835,9 @@ def _build_load_class_plan(cls):
 
 
 def _load_class_plan_cached(cls):
+    if not _dataclass_cache_enabled(cls):
+        return _build_load_class_plan(cls)
+
     try:
         plan = cls.__dict__.get(_LOAD_CLASS_PLAN_CACHE)
     except (AttributeError, TypeError):
@@ -3421,7 +3447,7 @@ def _field_type_for_load(cls, f, type_vars=None):
 
 
 def _field_type_for_load_cached(cls, f, type_vars=None):
-    if type_vars is not None:
+    if type_vars is not None or not _dataclass_cache_enabled(cls):
         return _field_type_for_load(cls, f, type_vars=type_vars)
 
     try:
@@ -3445,7 +3471,7 @@ def _field_type_for_load_cached(cls, f, type_vars=None):
 
 
 def _field_load_plan_cached(cls, f, field_type, type_vars=None):
-    if type_vars is not None:
+    if type_vars is not None or not _dataclass_cache_enabled(cls):
         return None
     if _has_unresolved_load_annotation(field_type):
         return None
@@ -3681,6 +3707,7 @@ def _load_inner_collect(cls, data, path="", unknown=RAISE,
 
 def load(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
          collect_errors=False):
+    # type: (typing.Any, dict, str, bool, typing.Optional[dict], bool) -> typing.Any
     """Create a dataclass instance from a dictionary with type validation.
 
     Args:
@@ -3727,6 +3754,7 @@ def _serializer_or_json(serializer):
 
 def loads(cls, payload, unknown=RAISE, strict_types=False, type_vars=None,
           collect_errors=False, serializer=None, **serializer_kwargs):
+    # type: (typing.Any, typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> typing.Any
     """Create a dataclass instance from serialized data with type validation."""
     data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
     return load(cls, data, unknown=unknown, strict_types=strict_types,
@@ -3734,12 +3762,14 @@ def loads(cls, payload, unknown=RAISE, strict_types=False, type_vars=None,
 
 
 def dump(obj, dict_factory=_default_dict_factory):
+    # type: (typing.Any, typing.Any) -> dict
     """Serialize a dataclass instance to a dictionary. Wrapper around asdict()."""
     return asdict(obj, dict_factory=dict_factory)
 
 
 def dumps(obj, dict_factory=_default_dict_factory, serializer=None,
           **serializer_kwargs):
+    # type: (typing.Any, typing.Any, typing.Any, **typing.Any) -> typing.Any
     """Serialize a dataclass instance with json or a custom serializer."""
     return _serializer_or_json(serializer).dumps(
         dump(obj, dict_factory=dict_factory), **serializer_kwargs)
@@ -3747,6 +3777,7 @@ def dumps(obj, dict_factory=_default_dict_factory, serializer=None,
 
 def validate(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
              collect_errors=False):
+    # type: (typing.Any, dict, str, bool, typing.Optional[dict], bool) -> bool
     """Validate a dictionary against a dataclass schema without creating an instance."""
     unknown = _validate_unknown_option(unknown)
     cls, type_vars = _dataclass_type_and_type_vars(cls, type_vars)
@@ -3771,6 +3802,7 @@ def validate(cls, data, unknown=RAISE, strict_types=False, type_vars=None,
 def validates(cls, payload, unknown=RAISE, strict_types=False,
               type_vars=None, collect_errors=False, serializer=None,
               **serializer_kwargs):
+    # type: (typing.Any, typing.Any, str, bool, typing.Optional[dict], bool, typing.Any, **typing.Any) -> bool
     """Validate serialized data against a dataclass schema without creating an instance."""
     data = _serializer_or_json(serializer).loads(payload, **serializer_kwargs)
     return validate(cls, data, unknown=unknown, strict_types=strict_types,
