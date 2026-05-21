@@ -30,7 +30,8 @@ jobs:
         with:
           workflow: build.yml
           workflow_conclusion: success
-          commit: ${{ inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.ref_name }}
+          event: push
           path: dist
 
       - name: Install Twine
@@ -52,4 +53,4 @@ jobs:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI }}
         run: |
-          python -m twine upload dist/**/* --verbose
+          python -m twine upload dist/py2dataclasses-py3.14/* --verbose
