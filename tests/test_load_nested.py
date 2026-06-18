@@ -224,6 +224,55 @@ class TestNestedCollections(unittest.TestCase):
         with self.assertRaises(TypeError):
             load(WithSet, {'values': [1, 'bad']})
 
+    def test_frozenset_generic_accepts_sequence(self):
+        obj = load(WithFrozenSet, {'values': [1, 2, 2]})
+
+        self.assertEqual(obj.values, frozenset([1, 2]))
+
+    def test_frozenset_generic_accepts_existing_sets(self):
+        obj = load(WithFrozenSet, {'values': set([1, 2])})
+        frozen_obj = load(WithFrozenSet, {'values': frozenset([3, 4])})
+
+        self.assertEqual(obj.values, frozenset([1, 2]))
+        self.assertEqual(frozen_obj.values, frozenset([3, 4]))
+
+    def test_frozenset_without_args_accepts_sequence(self):
+        obj = load(WithPlainFrozenSet, {'values': [1, 'two', 1]})
+
+        self.assertEqual(obj.values, frozenset([1, 'two']))
+
+    def test_frozenset_without_args_works_without_load_plan_cache(self):
+        @dataclass(cache=False)
+        class NoCacheFrozenSet(object):
+            values = field(FrozenSet)
+
+        obj = load(NoCacheFrozenSet, {'values': [1, 'two', 1]})
+
+        self.assertEqual(obj.values, frozenset([1, 'two']))
+
+    def test_frozenset_generic_works_without_load_plan_cache(self):
+        @dataclass(cache=False)
+        class NoCacheFrozenSet(object):
+            values = field(FrozenSet[int])
+
+        obj = load(NoCacheFrozenSet, {'values': ['1', 2, 2]})
+
+        self.assertEqual(obj.values, frozenset([1, 2]))
+
+        with self.assertRaises(TypeError):
+            load(NoCacheFrozenSet, {'values': 'not-a-set'})
+
+        with self.assertRaises(TypeError):
+            load(NoCacheFrozenSet, {'values': [1, 'bad']})
+
+    def test_frozenset_generic_rejects_non_sequence(self):
+        with self.assertRaises(TypeError):
+            load(WithFrozenSet, {'values': 'not-a-set'})
+
+    def test_frozenset_generic_rejects_wrong_element(self):
+        with self.assertRaises(TypeError):
+            load(WithFrozenSet, {'values': [1, 'bad']})
+
     def test_union_generic_accepts_first_type(self):
         obj = load(WithUnion, {'value': 42})
 

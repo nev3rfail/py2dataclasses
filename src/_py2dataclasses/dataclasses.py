@@ -2564,6 +2564,7 @@ _LOAD_PLAN_DICT = object()
 _LOAD_PLAN_TUPLE = object()
 _LOAD_PLAN_VAR_TUPLE = object()
 _LOAD_PLAN_SET = object()
+_LOAD_PLAN_FROZENSET = object()
 _LOAD_FIELD_LOADABLE = object()
 _LOAD_FIELD_CLASSVAR = object()
 _LOAD_FIELD_INIT_FALSE = object()
@@ -2661,6 +2662,14 @@ def _build_load_plan(expected_type):
                     return None
                 return (_LOAD_PLAN_SET, expected_type, item_plan)
             return (_LOAD_PLAN_SET, expected_type, None)
+
+        if _origin_is(origin, frozenset):
+            if args:
+                item_plan = _build_load_plan(args[0])
+                if item_plan is None:
+                    return None
+                return (_LOAD_PLAN_FROZENSET, expected_type, item_plan)
+            return (_LOAD_PLAN_FROZENSET, expected_type, None)
 
         return None
 
@@ -2794,6 +2803,21 @@ def _validate_and_convert_plan(value, plan, field_name, path,
                     create_instance=create_instance)
                 for i, v in enumerate(value))
         return set(value)
+
+    if kind is _LOAD_PLAN_FROZENSET:
+        if not isinstance(value, (list, set, frozenset)):
+            raise TypeError(
+                "Field '{0}' expected list or set, got {1}".format(
+                    full_path, type(value).__name__))
+        item_plan = plan[2]
+        if item_plan is not None:
+            return frozenset(
+                _validate_and_convert_plan(
+                    v, item_plan, "{0}{{{1}}}".format(field_name, i), path,
+                    unknown=unknown, strict_types=strict_types,
+                    create_instance=create_instance)
+                for i, v in enumerate(value))
+        return frozenset(value)
 
     if kind is _LOAD_PLAN_PLAIN:
         try:
@@ -3083,6 +3107,22 @@ def _validate_and_convert(value, expected_type, field_name, path,
                     for i, v in enumerate(value))
             return set(value)
 
+        # FrozenSet[X]
+        if _origin_is(origin, frozenset):
+            if not isinstance(value, (list, set, frozenset)):
+                raise TypeError(
+                    "Field '{0}' expected list or set, got {1}".format(
+                        full_path, type(value).__name__))
+            if args:
+                return frozenset(
+                    _validate_and_convert(
+                        v, args[0], "{0}{{{1}}}".format(field_name, i), path,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    for i, v in enumerate(value))
+            return frozenset(value)
+
         # Union[X, Y, ...] (non-Optional, since Optional was handled above)
         if origin is typing.Union:
             for variant in args:
@@ -3302,6 +3342,35 @@ def _validate_and_convert_collect(value, expected_type, path, errors,
                                 'hashable', type(converted).__name__, converted)
                 return result
             return set(value)
+
+        # FrozenSet[X]
+        if _origin_is(origin, frozenset):
+            if not isinstance(value, (list, set, frozenset)):
+                _add_validation_issue(
+                    errors, path,
+                    "expected list or set, got {0}".format(type(value).__name__),
+                    frozenset, type(value).__name__, value)
+                return value
+            if args:
+                result = set()
+                for i, v in enumerate(value):
+                    item_start = len(errors)
+                    converted = _validate_and_convert_collect(
+                        v, args[0], "{0}{{{1}}}".format(path, i), errors,
+                        unknown=unknown, strict_types=strict_types,
+                        type_vars=type_vars,
+                        create_instance=create_instance)
+                    if len(errors) == item_start:
+                        try:
+                            result.add(converted)
+                        except TypeError:
+                            _add_validation_issue(
+                                errors, "{0}{{{1}}}".format(path, i),
+                                "expected hashable set item, got {0}".format(
+                                    type(converted).__name__),
+                                'hashable', type(converted).__name__, converted)
+                return frozenset(result)
+            return frozenset(value)
 
         # Union[X, Y, ...] (non-Optional, since Optional was handled above)
         if origin is typing.Union:

@@ -12,7 +12,7 @@ from dataclasses import (
 )
 from typing import (
     ClassVar, List, Dict, Tuple, Optional, Any, TypeVar, Generic, Set, Union,
-    Callable,
+    Callable, FrozenSet,
 )
 
 
@@ -152,6 +152,16 @@ class WithListOfOptional(object):
 @dataclass
 class WithSet(object):
     values = field(Set[int])
+
+
+@dataclass
+class WithFrozenSet(object):
+    values = field(FrozenSet[int])
+
+
+@dataclass
+class WithPlainFrozenSet(object):
+    values = field(FrozenSet)
 
 
 @dataclass

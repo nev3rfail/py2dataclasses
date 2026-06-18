@@ -156,6 +156,7 @@ class TestLoadPlanCache(unittest.TestCase):
             mapping = field(Dict[str, int])
             pair = field(Tuple[int, str])
             value_set = field(Set[int])
+            value_frozenset = field(FrozenSet[int])
 
         payload = {
             'scalar': '1',
@@ -166,6 +167,7 @@ class TestLoadPlanCache(unittest.TestCase):
             'mapping': {'a': '6'},
             'pair': ['7', 'seven'],
             'value_set': ['8', 9],
+            'value_frozenset': ['10', 11],
         }
 
         obj = load(PlanShape, payload)
@@ -176,6 +178,7 @@ class TestLoadPlanCache(unittest.TestCase):
         self.assertEqual(obj.mapping, {'a': 6})
         self.assertEqual(obj.pair, (7, 'seven'))
         self.assertEqual(obj.value_set, set([8, 9]))
+        self.assertEqual(obj.value_frozenset, frozenset([10, 11]))
         self.assertEqual(PlanShape.__dataclass_params__.cache, cache_enabled)
 
         if cache_enabled:
@@ -183,7 +186,7 @@ class TestLoadPlanCache(unittest.TestCase):
             self.assertEqual(
                 sorted(cache.keys()),
                 ['any_value', 'mapping', 'nested', 'optional', 'pair',
-                 'scalar', 'value_set', 'values'])
+                 'scalar', 'value_frozenset', 'value_set', 'values'])
             first_plans = dict(cache)
 
             load(PlanShape, payload)
