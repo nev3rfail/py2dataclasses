@@ -249,6 +249,37 @@ class TestCollectErrors(unittest.TestCase):
         self.assertEqual(loaded.y, 1)
         self.assertEqual(_validation_default_factory_calls, ['factory'])
 
+    def test_collect_errors_handles_frozenset_items(self):
+        obj = load(WithFrozenSet, {'values': ['1', 2]}, collect_errors=True)
+
+        self.assertEqual(obj.values, frozenset([1, 2]))
+
+        self.assertValidationPaths(
+            lambda: load(WithFrozenSet, {'values': [1, 'bad']},
+                         collect_errors=True),
+            ['values{1}'])
+
+    def test_collect_errors_handles_frozenset_without_args(self):
+        obj = load(WithPlainFrozenSet, {'values': [1, 'two', 1]},
+                   collect_errors=True)
+
+        self.assertEqual(obj.values, frozenset([1, 'two']))
+
+        self.assertValidationPaths(
+            lambda: load(WithPlainFrozenSet, {'values': 'not-a-set'},
+                         collect_errors=True),
+            ['values'])
+
+    def test_collect_errors_reports_unhashable_frozenset_items(self):
+        @dataclass
+        class WithFrozenSetOfLists(object):
+            values = field(FrozenSet[List[int]])
+
+        self.assertValidationPaths(
+            lambda: load(WithFrozenSetOfLists, {'values': [[1]]},
+                         collect_errors=True),
+            ['values{0}'])
+
 
 # ---------------------------------------------------------------------------
 
